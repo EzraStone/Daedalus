@@ -1,0 +1,96 @@
+# The v1 gate library.
+#
+# There is exactly one active cell, because redstone only gives you one: a
+# solid block with a torch on it inverts whatever powers the block. Feed that
+# block from one dust net and it is a NOT; feed it from a net with several
+# drivers and it is a NOR. Every other combinational gate is a composition of
+# those two, so there is no AND stamp here, no XOR stamp, and nothing to keep
+# in step with the simulator when the rules change.
+#
+# All coordinates are (dx, dz) offsets from the cell's anchor, on the logic
+# layer. `attach` is the direction from the torch to the block holding it up.
+#
+# `input_faces` are the cells a dust net may approach the block from.
+# `output_faces` are the cells a torch can drive.
+#
+# Two rules the placer enforces that are not obvious from the geometry:
+#
+#   * A dust cell only weakly powers the blocks it *points* at, and its
+#     pointing is decided by its connections. So an input face must be the
+#     dead end of its net -- exactly one dust neighbour, opposite the block.
+#     Dust that merely runs past the block does not power it.
+#   * A torch's faces are mutually non-adjacent, so one torch can drive up to
+#     three separate nets without them merging. That is the whole fanout
+#     budget; a driver needed in four places wants a buffer stage.
+
+version: 1
+
+gates:
+  - name: invert
+    kind: nor
+    description: >
+      Solid block plus a wall torch. One input net (any number of drivers),
+      one output driver. Costs one redstone tick.
+    cost:
+      blocks: 2
+      latency_rt: 1
+    orientations:
+      - name: east
+        block: [0, 0]
+        torch: [1, 0]
+        attach: west
+        input_faces: [[-1, 0], [0, -1], [0, 1]]
+        output_faces: [[2, 0], [1, -1], [1, 1]]
+      - name: west
+        block: [0, 0]
+        torch: [-1, 0]
+        attach: east
+        input_faces: [[1, 0], [0, -1], [0, 1]]
+        output_faces: [[-2, 0], [-1, -1], [-1, 1]]
+      - name: south
+        block: [0, 0]
+        torch: [0, 1]
+        attach: north
+        input_faces: [[0, -1], [-1, 0], [1, 0]]
+        output_faces: [[0, 2], [-1, 1], [1, 1]]
+      - name: north
+        block: [0, 0]
+        torch: [0, -1]
+        attach: south
+        input_faces: [[0, 1], [-1, 0], [1, 0]]
+        output_faces: [[0, -2], [-1, -1], [1, -1]]
+
+# Passive cells the router places on its own. Listed here so the library is a
+# complete account of what can appear in a generated layout.
+passives:
+  - name: dust
+    description: Signal strength falls by one per cell; a run dies after 15.
+    max_run: 15
+  - name: repeater
+    description: >
+      Restores the signal to 15 and blocks it in reverse. Inserted
+      automatically when a net cannot reach a terminal at strength >= 1.
+      Needs three collinear cells: dust in, repeater, dust out.
+    cost:
+      blocks: 1
+      latency_rt: 1
+
+ports:
+  input:
+    description: >
+      Lever on the x=0 face, hanging off a solid block at x=1. The block is
+      what carries the lever's strong power into the circuit, so dust picks the
+      signal up from any of the block's three free faces.
+    lever_x: 0
+    support_x: 1
+    attach: east
+  output:
+    description: >
+      Repeater at x=14 driving a lamp at x=15. The repeater is not decoration:
+      it makes the last hop unconditional. A bare dust cell only lights the
+      lamp when it happens to have exactly one connection, which depends on how
+      the route arrived -- a fragile property to build a corpus on. One
+      redstone tick buys it away.
+    repeater_x: 14
+    lamp_x: 15
+    facing: east

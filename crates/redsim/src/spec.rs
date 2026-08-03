@@ -157,10 +157,12 @@ impl Spec {
         // FNV-1a over (n_inputs, n_outputs, table). Chosen over the default
         // hasher because the value is written into dataset files and has to
         // stay identical across Rust releases.
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+        let mut h: u64 = FNV_OFFSET;
         let mut mix = |b: u8| {
             h ^= b as u64;
-            h = h.wrapping_mul(0x1000_0000_01b3);
+            h = h.wrapping_mul(FNV_PRIME);
         };
         mix(self.n_inputs() as u8);
         mix(self.n_outputs() as u8);

@@ -46,9 +46,10 @@ fn main() {
             println!("redsim {}", env!("CARGO_PKG_VERSION"));
         }
         Some("selftest") => selftest(),
+        Some("vocab") => dump_vocab(),
         Some(other) => {
             eprintln!("redsim: unknown command {other:?}");
-            eprintln!("usage: redsim [serve|selftest|version]");
+            eprintln!("usage: redsim [serve|selftest|vocab|version]");
             std::process::exit(2);
         }
     }
@@ -214,6 +215,74 @@ fn write_verdict<W: Write>(w: &mut W, v: &Verdict) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Dump the vocabulary and a set of reference spec hashes as text.
+///
+/// The Python side re-derives all of this independently, and
+/// `tests/test_vocab_parity.py` diffs the two. Token ids are a wire format
+/// baked into every serialised corpus and every checkpoint, so "the two
+/// implementations agree" has to be a test, not a comment.
+fn dump_vocab() {
+    use redsim::block::{Block, CONTROL_BASE, VOCAB_SIZE};
+    use redsim::grid::glyph;
+
+    println!("# id\tglyph\topaque\tconductive\tstate");
+    for t in 0..CONTROL_BASE {
+        let b = Block::from_token(t).expect("non-control ids decode");
+        println!(
+            "{t}\t{}\t{}\t{}\t{}",
+            glyph(b),
+            u8::from(b.is_opaque()),
+            u8::from(b.is_conductive()),
+            b.state_string()
+        );
+    }
+    for t in CONTROL_BASE..VOCAB_SIZE as u8 {
+        let name = match t {
+            redsim::block::TOK_PAD => "PAD",
+            redsim::block::TOK_BOS => "BOS",
+            redsim::block::TOK_EOS => "EOS",
+            _ => "MASK",
+        };
+        println!("{t}\t-\t0\t0\tcontrol:{name}");
+    }
+
+    println!("# geometry\tsx\tsy\tsz\tcells\tsubstrate_y\tlogic_y\tinput_x\toutput_x");
+    println!(
+        "geometry\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        redsim::grid::SX,
+        redsim::grid::SY,
+        redsim::grid::SZ,
+        redsim::grid::CELLS,
+        redsim::grid::SUBSTRATE_Y,
+        redsim::grid::LOGIC_Y,
+        redsim::grid::INPUT_X,
+        redsim::grid::OUTPUT_X
+    );
+
+    // Reference semantic hashes. Any drift here means the corpus dedup key
+    // has silently changed and every cached dataset is stale.
+    println!("# hash\tn_in\tn_out\trows...\tvalue");
+    for (n_in, n_out, rows) in [
+        (1usize, 1usize, vec![0u64, 1]),
+        (1, 1, vec![1, 0]),
+        (2, 1, vec![1, 1, 1, 0]),
+        (2, 1, vec![0, 0, 0, 1]),
+        (2, 1, vec![0, 1, 1, 0]),
+        (2, 2, vec![0b00, 0b01, 0b10, 0b11]),
+        (3, 1, vec![0, 1, 1, 0, 1, 0, 0, 1]),
+    ] {
+        let inputs: Vec<Port> = (0..n_in)
+            .map(|k| Port { name: format!("in{k}"), pos: Pos::new(0, 1, 2 * k as i32 + 1) })
+            .collect();
+        let outputs: Vec<Port> = (0..n_out)
+            .map(|k| Port { name: format!("out{k}"), pos: Pos::new(15, 1, 2 * k as i32 + 1) })
+            .collect();
+        let spec = Spec::new(inputs, outputs, rows.clone(), Constraints::default()).unwrap();
+        let cells: Vec<String> = rows.iter().map(|r| r.to_string()).collect();
+        println!("hash\t{n_in}\t{n_out}\t{}\t{:016x}", cells.join(","), spec.semantic_hash());
+    }
 }
 
 /// A five-second sanity check that the binary works at all, for anyone who
