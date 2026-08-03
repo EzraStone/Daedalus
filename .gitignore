@@ -1,0 +1,25 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Generated data and runs
+/data/
+/runs/
+/checkpoints/
+*.npz
+*.schem
+*.litematic
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,19 @@
+[package]
+name = "redsim"
+description = "Deterministic headless simulator for a documented subset of Java-edition redstone"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+rayon = "1.12"
+
+[[bin]]
+name = "redsim"
+path = "src/bin/redsim.rs"
+
+[lib]
+name = "redsim"
+path = "src/lib.rs"
