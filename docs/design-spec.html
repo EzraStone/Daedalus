@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redstone Whisperer — Design Specification</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..900&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#0F1318;
+  --panel:#171C23;
+  --panel-2:#1D242D;
+  --rule:#29323D;
+  --rule-soft:#202730;
+  --ink:#DDE4EB;
+  --ink-2:#A9B4C0;
+  --ink-dim:#77828F;
+  --live:#F0392C;
+  --live-soft:#5A1A17;
+  --cool:#5FB3C4;
+  --warn:#E0A82E;
+  --pass:#4FBF8B;
+
+  --display:"Archivo",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+
+  --rail:14.5rem;
+  --measure:70ch;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--void);color:var(--ink);
+  font-family:var(--body);font-size:16px;line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    repeating-linear-gradient(90deg,rgba(95,179,196,.028) 0 1px,transparent 1px 48px),
+    repeating-linear-gradient(0deg,rgba(95,179,196,.028) 0 1px,transparent 1px 48px);
+}
+a{color:var(--cool);text-decoration:none;border-bottom:1px solid rgba(95,179,196,.35)}
+a:hover{border-bottom-color:var(--cool)}
+:focus-visible{outline:2px solid var(--cool);outline-offset:3px}
+
+/* ---------- type primitives ---------- */
+.eyebrow{
+  font-family:var(--mono);font-size:.66rem;font-weight:500;
+  letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);
+}
+h1,h2,h3{font-family:var(--display);font-variation-settings:"wdth" 118;margin:0;line-height:1.02}
+h1{font-weight:900;letter-spacing:-.02em}
+h2{font-weight:800;font-size:clamp(1.5rem,3.4vw,2.15rem);letter-spacing:-.012em;text-transform:uppercase}
+h3{font-weight:700;font-size:1rem;letter-spacing:.04em;text-transform:uppercase;color:var(--ink)}
+p{margin:0 0 1.05em;max-width:var(--measure);color:var(--ink-2)}
+p strong,li strong{color:var(--ink);font-weight:600}
+code{font-family:var(--mono);font-size:.86em;background:var(--panel-2);
+  border:1px solid var(--rule-soft);border-radius:3px;padding:.08em .34em;color:#C6D4E0}
+
+/* ---------- shell ---------- */
+.shell{position:relative;z-index:1;display:grid;grid-template-columns:var(--rail) minmax(0,1fr);
+  max-width:1360px;margin:0 auto;gap:0}
+
+/* ---------- left rail ---------- */
+.rail{border-right:1px solid var(--rule);padding:2rem 0 4rem}
+.rail-inner{position:sticky;top:2rem;padding:0 1.4rem}
+.mark{font-family:var(--display);font-variation-settings:"wdth" 125;font-weight:900;
+  font-size:.82rem;letter-spacing:.02em;line-height:1.12;text-transform:uppercase;margin-bottom:.3rem}
+.mark span{color:var(--live)}
+.mark-sub{font-family:var(--mono);font-size:.62rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-dim);margin-bottom:1.6rem}
+.toc{list-style:none;margin:0;padding:0;border-top:1px solid var(--rule-soft)}
+.toc li{border-bottom:1px solid var(--rule-soft)}
+.toc a{display:grid;grid-template-columns:2.1rem 1fr;gap:.3rem;padding:.5rem 0;
+  font-family:var(--mono);font-size:.71rem;letter-spacing:.02em;color:var(--ink-dim);border:0}
+.toc a:hover{color:var(--ink)}
+.toc a:hover .tn{color:var(--live)}
+.tn{color:#4C5763}
+
+/* ---------- main ---------- */
+main{min-width:0;padding:0 0 7rem}
+.pad{padding:0 clamp(1.15rem,3.4vw,3rem)}
+
+/* ---------- hero ---------- */
+.hero{padding:3.2rem 0 2.4rem;border-bottom:1px solid var(--rule)}
+.hero h1{font-size:clamp(2.4rem,7.2vw,5.1rem);text-transform:uppercase;margin:.75rem 0 0}
+.hero h1 em{font-style:normal;color:var(--live)}
+.lede{font-size:clamp(1.02rem,1.5vw,1.2rem);color:var(--ink-2);max-width:56ch;margin-top:1.1rem}
+.lede b{color:var(--ink);font-weight:600}
+
+/* ---------- verifier widget ---------- */
+.verifier{margin-top:2.4rem;border:1px solid var(--rule);background:var(--panel);
+  display:grid;grid-template-columns:minmax(0,1fr) 17rem}
+.v-head{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:.4rem 1.5rem;align-items:baseline;
+  padding:.7rem 1rem;border-bottom:1px solid var(--rule);background:var(--panel-2)}
+.v-head .eyebrow{color:var(--cool)}
+.v-stat{font-family:var(--mono);font-size:.7rem;color:var(--ink-dim);margin-left:auto}
+.v-stat b{color:var(--ink);font-weight:500}
+.v-stage{padding:1.15rem 1rem 1.35rem;min-width:0}
+.spec-line{font-family:var(--mono);font-size:.8rem;color:var(--ink-2);margin-bottom:1rem;
+  padding-left:.7rem;border-left:2px solid var(--live)}
+.spec-line b{color:var(--ink);font-weight:600}
+
+.grid-wrap{overflow-x:auto;padding-bottom:.35rem}
+.cgrid{display:grid;gap:2px;width:max-content}
+.cell{width:20px;height:20px;border-radius:2px;background:#12161B;position:relative}
+.cell.air{background:transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.028)}
+.cell.block{background:#39424E;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.cell.dust{background:#232A32}
+.cell.lever,.cell.torch,.cell.rep,.cell.lamp{
+  display:grid;place-items:center;font-family:var(--mono);font-size:10px;font-weight:600}
+.cell.lever{background:#2C333C;color:var(--ink-2)}
+.cell.lever.on{background:var(--live);color:#12161B}
+.cell.torch{background:#242B33;color:#6B7682}
+.cell.torch.on{background:#40130F;color:var(--live);box-shadow:0 0 0 1px rgba(240,57,44,.5)}
+.cell.rep{background:#2C333C;color:var(--ink-dim)}
+.cell.rep.on{background:#40130F;color:var(--live)}
+.cell.lamp{background:#2A313A;color:#6B7682}
+.cell.lamp.on{background:#F5C542;color:#221A05;box-shadow:0 0 10px rgba(245,197,66,.4)}
+.cell.hidden{opacity:.22}
+
+.legend{display:flex;align-items:center;gap:.5rem;margin-top:.9rem;flex-wrap:wrap}
+.legend .eyebrow{font-size:.6rem}
+.ramp{display:flex;gap:1px}
+.ramp i{width:11px;height:11px;border-radius:1px;display:block}
+
+/* ---------- truth table panel ---------- */
+.v-truth{border-left:1px solid var(--rule);padding:1.15rem 1rem;background:var(--panel-2)}
+table.tt{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:.74rem}
+table.tt th{text-align:left;font-weight:500;color:var(--ink-dim);font-size:.62rem;
+  letter-spacing:.12em;text-transform:uppercase;padding:0 .4rem .45rem 0;border-bottom:1px solid var(--rule)}
+table.tt td{padding:.32rem .4rem .32rem 0;border-bottom:1px solid var(--rule-soft);color:var(--ink-2)}
+table.tt tr.active td{color:var(--ink);background:rgba(95,179,196,.06)}
+table.tt td.mark-ok{color:var(--pass)}
+table.tt td.mark-no{color:var(--live)}
+table.tt td.pending{color:#4C5763}
+.stamp{margin-top:1rem;font-family:var(--display);font-variation-settings:"wdth" 122;
+  font-weight:900;font-size:1.05rem;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--rule);padding:.45rem .6rem;color:var(--ink-dim)}
+.stamp.pass{color:var(--pass);border-color:rgba(79,191,139,.5);background:rgba(79,191,139,.07)}
+.stamp.fail{color:var(--live);border-color:rgba(240,57,44,.5);background:rgba(240,57,44,.07)}
+.stamp small{display:block;font-family:var(--mono);font-size:.6rem;font-weight:400;
+  letter-spacing:.08em;color:var(--ink-dim);margin-top:.2rem;text-transform:none}
+.v-note{font-family:var(--mono);font-size:.63rem;line-height:1.5;color:#5E6975;margin-top:1rem}
+
+/* ---------- sections ---------- */
+section{padding:3.1rem 0 .6rem;border-bottom:1px solid var(--rule-soft)}
+section:last-of-type{border-bottom:0}
+.s-head{display:grid;grid-template-columns:3.3rem minmax(0,1fr);gap:.4rem;margin-bottom:1.5rem}
+.s-num{font-family:var(--mono);font-size:.72rem;font-weight:600;color:var(--live);padding-top:.42rem}
+.s-sub{margin-top:.5rem;font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-dim)}
+.s-body{padding-left:0}
+@media(min-width:900px){.s-body{padding-left:3.7rem}}
+
+/* ---------- content blocks ---------- */
+.callout{border:1px solid var(--rule);border-left:2px solid var(--cool);
+  background:var(--panel);padding:.9rem 1rem;margin:1.4rem 0;max-width:var(--measure)}
+.callout.warn{border-left-color:var(--warn)}
+.callout.hot{border-left-color:var(--live)}
+.callout .eyebrow{display:block;margin-bottom:.35rem;color:var(--cool)}
+.callout.warn .eyebrow{color:var(--warn)}
+.callout.hot .eyebrow{color:var(--live)}
+.callout p{margin:0;font-size:.93rem}
+.callout p + p{margin-top:.7rem}
+
+pre{font-family:var(--mono);font-size:.76rem;line-height:1.62;background:var(--panel);
+  border:1px solid var(--rule);padding:.95rem 1rem;overflow-x:auto;margin:1.4rem 0;color:#C1CEDA}
+pre b{color:var(--live);font-weight:500}
+pre i{color:#5E6975;font-style:normal}
+pre u{color:var(--cool);text-decoration:none}
+
+.tbl{overflow-x:auto;margin:1.4rem 0;border:1px solid var(--rule)}
+table.data{width:100%;border-collapse:collapse;font-size:.83rem;min-width:34rem}
+table.data th{background:var(--panel-2);text-align:left;font-family:var(--mono);
+  font-size:.62rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-dim);padding:.6rem .8rem;border-bottom:1px solid var(--rule)}
+table.data td{padding:.55rem .8rem;border-bottom:1px solid var(--rule-soft);
+  vertical-align:top;color:var(--ink-2)}
+table.data tr:last-child td{border-bottom:0}
+table.data td:first-child{color:var(--ink);font-family:var(--mono);font-size:.79rem;white-space:nowrap}
+table.data td.n{font-family:var(--mono);color:var(--cool);white-space:nowrap}
+
+ul.tight,ol.tight{max-width:var(--measure);color:var(--ink-2);padding-left:1.15rem;margin:0 0 1.2rem}
+ul.tight li,ol.tight li{margin-bottom:.42rem}
+ul.tight li::marker{color:var(--live)}
+ol.tight li::marker{color:var(--cool);font-family:var(--mono);font-size:.85em}
+
+.split{display:grid;gap:1.15rem;margin:1.4rem 0}
+@media(min-width:780px){.split{grid-template-columns:1fr 1fr}}
+.card{border:1px solid var(--rule);background:var(--panel);padding:1rem}
+.card h3{margin-bottom:.5rem;font-size:.82rem}
+.card p{font-size:.9rem;margin:0}
+.card p + p{margin-top:.6rem}
+.card ul{margin:.5rem 0 0;padding-left:1.05rem;font-size:.88rem;color:var(--ink-2)}
+.card ul li{margin-bottom:.3rem}
+.card ul li::marker{color:var(--ink-dim)}
+
+.milestones{list-style:none;padding:0;margin:1.4rem 0;border-top:1px solid var(--rule)}
+.milestones li{display:grid;grid-template-columns:5.5rem minmax(0,1fr);gap:.9rem;
+  padding:.8rem 0;border-bottom:1px solid var(--rule-soft)}
+.m-tag{font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;color:var(--live);padding-top:.2rem}
+.m-body b{display:block;color:var(--ink);font-weight:600;font-size:.94rem;margin-bottom:.15rem}
+.m-body span{font-size:.88rem;color:var(--ink-2)}
+.m-body em{font-style:normal;color:var(--pass);font-family:var(--mono);font-size:.72rem;
+  display:block;margin-top:.3rem}
+
+footer{padding:2.6rem 0 0;border-top:1px solid var(--rule);margin-top:3rem}
+footer p{font-family:var(--mono);font-size:.7rem;color:var(--ink-dim);max-width:60ch}
+
+@media(max-width:860px){
+  .shell{grid-template-columns:1fr}
+  .rail{border-right:0;border-bottom:1px solid var(--rule);padding:1.4rem 0 1rem}
+  .rail-inner{position:static}
+  .toc{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr));
+    border-top:1px solid var(--rule-soft)}
+  .verifier{grid-template-columns:1fr}
+  .v-truth{border-left:0;border-top:1px solid var(--rule)}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.cell,.stamp,table.tt td{transition:background .16s linear,color .16s linear,opacity .16s linear}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<aside class="rail">
+  <div class="rail-inner">
+    <div class="mark">Redstone<br><span>Whisperer</span></div>
+    <div class="mark-sub">Design spec · rev 0.3</div>
+    <ol class="toc">
+      <li><a href="#thesis"><span class="tn">00</span> Thesis</a></li>
+      <li><a href="#arch"><span class="tn">01</span> Architecture</a></li>
+      <li><a href="#repr"><span class="tn">02</span> Representation</a></li>
+      <li><a href="#sim"><span class="tn">03</span> Simulator</a></li>
+      <li><a href="#data"><span class="tn">04</span> Data engine</a></li>
+      <li><a href="#model"><span class="tn">05</span> Model</a></li>
+      <li><a href="#loop"><span class="tn">06</span> Verifier loop</a></li>
+      <li><a href="#eval"><span class="tn">07</span> Evaluation</a></li>
+      <li><a href="#repo"><span class="tn">08</span> Repo &amp; plan</a></li>
+      <li><a href="#hw"><span class="tn">09</span> Hardware</a></li>
+      <li><a href="#faq"><span class="tn">10</span> Objections</a></li>
+    </ol>
+  </div>
+</aside>
+
+<main>
+
+<!-- ============ HERO ============ -->
+<div class="hero pad">
+  <div class="eyebrow">Text → verified redstone · generative modeling with a ground-truth judge</div>
+  <h1>Circuits that<br>work, <em>provably</em></h1>
+  <p class="lede">Existing voxel generators produce structures that <b>look</b> plausible. This one produces circuits whose behavior is <b>checked against a truth table</b> before you ever see them — because the simulator is part of the model, not an afterthought.</p>
+
+  <div class="verifier" id="verifier">
+    <div class="v-head">
+      <span class="eyebrow">Live · verifier-guided sampling</span>
+      <span class="v-stat" id="vstat">candidate <b>—</b> · accepted <b>0</b></span>
+    </div>
+    <div class="v-stage">
+      <div class="spec-line">spec.request = <b>"invert the AND of two levers"</b><br>spec.canonical = <b>out = ¬(A ∧ B)</b> · latency ≤ 2rt · footprint minimize</div>
+      <div class="grid-wrap"><div class="cgrid" id="cgrid"></div></div>
+      <div class="legend">
+        <span class="eyebrow">signal strength</span>
+        <span class="ramp" id="ramp"></span>
+        <span class="eyebrow" style="color:#4C5763">0 → 15</span>
+      </div>
+    </div>
+    <div class="v-truth">
+      <table class="tt">
+        <thead><tr><th>A</th><th>B</th><th>out</th><th>want</th><th></th></tr></thead>
+        <tbody id="ttbody"></tbody>
+      </table>
+      <div class="stamp" id="stamp">simulating<small>propagating signal…</small></div>
+      <p class="v-note">Running a real fixed-point solver in your browser: dust decay, torch inversion, repeater restoration, oscillation detection. Planar top-down abstraction of the engine in §03.</p>
+    </div>
+  </div>
+</div>
+
+<div class="pad">
+
+<!-- ============ 00 ============ -->
+<section id="thesis">
+  <div class="s-head">
+    <div class="s-num">00</div>
+    <div>
+      <h2>The thesis</h2>
+      <div class="s-sub">What is actually new here</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <p>Generative models of Minecraft — Dream-Cubed, Oasis, the GDMC lineage — condition on <em>shape</em>: terrain, style, silhouette, a prompt describing appearance. Success is judged by whether a human thinks it looks right. That works for landscapes, where "looks right" is the whole objective.</p>
+    <p>Redstone breaks that. A circuit that looks like a circuit and does nothing is worthless, and the difference between working and broken is often one block. So the objective has to change: <strong>condition generation on function, and let a simulator decide whether the sample was any good.</strong></p>
+    <p>That single change unlocks three things nobody in the voxel-generation space currently has:</p>
+    <ul class="tight">
+      <li><strong>A dense, free, non-human reward signal.</strong> No annotators, no aesthetic preference model. Every sample gets an exact pass/fail plus continuous scores for latency and footprint.</li>
+      <li><strong>Unlimited perfectly-labeled training data.</strong> Compose known-good gate primitives into random graphs, derive the label from the graph. No scraped schematics, no licensing ambiguity, no noisy captions.</li>
+      <li><strong>A self-improvement loop with a hard floor.</strong> Sample, simulate, keep only what verifies, retrain on that. Quality can only go up, and you can plot it.</li>
+    </ul>
+    <div class="callout hot">
+      <span class="eyebrow">One-line pitch</span>
+      <p>A text-conditioned discrete diffusion model over Minecraft block states, trained on procedurally-generated logic circuits, and fine-tuned exclusively on its own samples that pass a headless redstone simulator.</p>
+    </div>
+    <div class="callout">
+      <span class="eyebrow">Repo name candidates</span>
+      <p><code>redstone-whisperer</code> is memorable but soft for a systems repo. Stronger: <code>dustc</code> (the dust compiler), <code>ticksmith</code>, <code>gfx15</code> (a signal-strength pun), <code>verilogic</code>. Recommendation: <strong><code>dustc</code></strong> as the package name, "Redstone Whisperer" as the project title in the README hero.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 01 ============ -->
+<section id="arch">
+  <div class="s-head">
+    <div class="s-num">01</div>
+    <div>
+      <h2>System architecture</h2>
+      <div class="s-sub">Five components, one closed loop</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <p>The dataflow is a loop, not a pipeline. The generator's output re-enters the training set through the verifier, which is why the numbering below matters — each stage consumes only what the previous one guarantees.</p>
+<pre>
+                    <u>┌──────────────────────────────────┐</u>
+                    <u>│</u>  <b>A. SPEC SPACE</b>                   <u>│</u>
+                    <u>│</u>  random logic DAG ──┐             <u>│</u>
+                    <u>│</u>                     ├─► canonical <u>│</u>
+                    <u>│</u>  NL paraphrase   ◄──┘   spec DSL  <u>│</u>
+                    <u>└─────────────┬────────────────────┘</u>
+                                  │  (spec, layout) pairs
+                    <u>┌─────────────▼────────────────────┐</u>
+                    <u>│</u>  <b>B. LAYOUT SYNTHESIZER</b>           <u>│</u>
+                    <u>│</u>  gate library + router → voxels  <u>│</u>
+                    <u>└─────────────┬────────────────────┘</u>
+                                  │  seed corpus (~2M grids)
+                    <u>┌─────────────▼────────────────────┐</u>
+                    <u>│</u>  <b>C. GENERATOR</b>                    <u>│</u>
+      spec ────────►<u>│</u>  masked discrete diffusion over  <u>│</u>
+                    <u>│</u>  16×16×6 block-state tokens      <u>│</u>
+                    <u>└─────────────┬────────────────────┘</u>
+                                  │  N candidate grids
+                    <u>┌─────────────▼────────────────────┐</u>
+                    <u>│</u>  <b>D. VERIFIER</b>                     <u>│</u>
+                    <u>│</u>  headless tick simulator         <u>│</u>
+                    <u>│</u>  → truth table, latency, size    <u>│</u>
+                    <u>└──────┬───────────────────┬───────┘</u>
+                 pass │                   │ fail
+        <u>┌───────────────▼──────┐</u>   <u>┌──────▼─────────────────┐</u>
+        <u>│</u> <b>E. EXPORT</b>             <u>│</u>   <u>│</u> <b>F. REPLAY BUFFER</b>       <u>│</u>
+        <u>│</u> .schem / .litematic  <u>│</u>   <u>│</u> hard negatives, ranked <u>│</u>
+        <u>│</u> in-game placement    <u>│</u>   <u>│</u> by edit distance       <u>│</u>
+        <u>└──────────────────────┘</u>   <u>└──────┬─────────────────┘</u>
+                    ▲                        │
+                    └────── retrain ◄────────┘   <i>(§06)</i>
+</pre>
+    <div class="tbl">
+      <table class="data">
+        <thead><tr><th>Component</th><th>Language</th><th>Depends on</th><th>Blocking?</th></tr></thead>
+        <tbody>
+          <tr><td>D. Verifier</td><td>Rust core + PyO3 bindings</td><td>nothing</td><td class="n">build first</td></tr>
+          <tr><td>B. Synthesizer</td><td>Python</td><td>gate library YAML</td><td class="n">build second</td></tr>
+          <tr><td>A. Spec space</td><td>Python + one LLM pass</td><td>B for validation</td><td class="n">parallel</td></tr>
+          <tr><td>C. Generator</td><td>PyTorch</td><td>A, B for data</td><td class="n">week 3+</td></tr>
+          <tr><td>E. Export</td><td>Python (<code>nbtlib</code>)</td><td>nothing</td><td class="n">parallel</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn">
+      <span class="eyebrow">Build order is not negotiable</span>
+      <p>The verifier is the only component that has no upstream dependency and that every other component's correctness is defined against. Write it first, with a golden test suite of hand-built circuits, before a single line of model code. If the simulator is wrong, every downstream number in your README is a lie you can't detect.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 02 ============ -->
+<section id="repr">
+  <div class="s-head">
+    <div class="s-num">02</div>
+    <div>
+      <h2>Representation</h2>
+      <div class="s-sub">Grid geometry, block-state vocabulary, token order</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <h3>Grid geometry</h3>
+    <p>Redstone is overwhelmingly planar. Circuits spread in <code>x</code>/<code>z</code> and use <code>y</code> only for torch towers, dust-over-block runs, and the occasional two-level crossing. A cube is the wrong shape; a slab is right.</p>
+    <div class="tbl">
+      <table class="data">
+        <thead><tr><th>Property</th><th>v1 value</th><th>Rationale</th></tr></thead>
+        <tbody>
+          <tr><td>Grid dims (x, y, z)</td><td class="n">16 × 6 × 16</td><td>1536 cells. Fits the vast majority of ≤6-gate combinational circuits with routing slack.</td></tr>
+          <tr><td>Origin convention</td><td class="n">y=0 is the substrate</td><td>Layer 0 is always solid or air; dust lives on y=1. Removes an entire class of "floating dust" invalid samples.</td></tr>
+          <tr><td>Token order</td><td class="n">y → z → x raster</td><td>Layer-major. Keeps a full planar layer contiguous in the sequence so local attention sees a whole slice.</td></tr>
+          <tr><td>I/O ports</td><td class="n">fixed edge slots</td><td>Inputs on the x=0 face, outputs on x=15. Fixing port positions removes a huge nuisance degree of freedom in v1; free-placement is a v2 ablation.</td></tr>
+          <tr><td>Sequence length</td><td class="n">1536 + 32 prefix</td><td>Prefix carries the encoded spec (§05).</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Block-state vocabulary</h3>
+    <p>One token per <em>fully-resolved block state</em>, not per block type. A repeater facing north with delay 3 is a different token from one facing north with delay 1, because they behave differently and the model must not have to infer state from context. Dust connection shape is <strong>excluded</strong> — it is derivable from neighbors, so including it would let the model emit self-contradictory grids.</p>
+    <div class="tbl">
+      <table class="data">
+        <thead><tr><th>Block</th><th>States kept</th><th>Tokens</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>air</td><td>—</td><td class="n">1</td><td>Will be ~85% of every grid. Watch for mode collapse to all-air; see §05 loss weighting.</td></tr>
+          <tr><td>solid substrate</td><td>—</td><td class="n">1</td><td>Single canonical opaque block. Do not model stone vs. deepslate — cosmetic, doubles vocab for zero signal.</td></tr>
+          <tr><td>redstone_wire</td><td>power 0–15 dropped</td><td class="n">1</td><td>Power is simulator output, never input. Critical: including it invites the model to hallucinate an unreachable powered state.</td></tr>
+          <tr><td>redstone_torch</td><td>attach face ×5, lit dropped</td><td class="n">5</td><td>Wall torches ×4 + floor torch. Lit state is derived.</td></tr>
+          <tr><td>repeater</td><td>facing ×4, delay ×4, locked dropped</td><td class="n">16</td><td>Delay in redstone ticks 1–4.</td></tr>
+          <tr><td>comparator</td><td>facing ×4, mode ×2</td><td class="n">8</td><td>Compare / subtract. Container-reading is v2.</td></tr>
+          <tr><td>lever</td><td>facing ×4 (input port)</td><td class="n">4</td><td>Only legal on the input face.</td></tr>
+          <tr><td>redstone_lamp</td><td>facing n/a (output port)</td><td class="n">1</td><td>Only legal on the output face.</td></tr>
+          <tr><td>target block</td><td>—</td><td class="n">1</td><td>Cheap way to teach signal-strength arithmetic.</td></tr>
+          <tr><td>observer</td><td>facing ×6</td><td class="n">6</td><td>Included in vocab, excluded from v1 generation (edge-triggered → sequential).</td></tr>
+          <tr><td>Special</td><td>PAD, BOS, EOS, MASK</td><td class="n">4</td><td>MASK is the absorbing state for diffusion.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>v1 vocabulary: 48 tokens.</strong> That is astonishingly small — smaller than a DNA k-mer vocabulary — which is exactly why a 25M-parameter model is the right size and why this trains on one consumer GPU.</p>
+    <div class="callout">
+      <span class="eyebrow">Design note</span>
+      <p>Resist the urge to expand the vocabulary early. Pistons, dispensers, droppers and slime blocks all bring in quasi-connectivity — the notorious Java-edition bug where a block "senses" power diagonally below-adjacent. Modeling QC correctly triples simulator complexity and makes your golden tests version-dependent. Ship combinational logic first.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 03 ============ -->
+<section id="sim">
+  <div class="s-head">
+    <div class="s-num">03</div>
+    <div>
+      <h2>The simulator</h2>
+      <div class="s-sub">The component the whole project's credibility rests on</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <p>This is not a Minecraft reimplementation. It is a <strong>deterministic model of a documented subset of redstone</strong>, plus a harness that proves the subset matches the real game. Being explicit about that boundary is what separates a serious repo from a toy.</p>
+
+    <h3>Tick semantics</h3>
+    <div class="tbl">
+      <table class="data">
+        <thead><tr><th>Rule</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td>time base</td><td>1 redstone tick = 2 game ticks = 0.1 s. Simulator steps in game ticks; latency reported in redstone ticks.</td></tr>
+          <tr><td>dust propagation</td><td><strong>Instantaneous</strong> within a tick. Strength = max(neighbor) − 1, floor 0. Solved by multi-source BFS from all emitters, not by iteration — this is both faster and exactly correct.</td></tr>
+          <tr><td>dust range</td><td>15 blocks from a strength-15 source. Enforced by decay, not by a special case.</td></tr>
+          <tr><td>torch</td><td>Output = ¬(attached block powered), with 1 redstone tick delay. Powers the block above it and dust adjacent to it.</td></tr>
+          <tr><td>repeater</td><td>Restores to 15, directional, delay 1–4 rt, blocks reverse signal. Locking by side-input repeaters: <em>implement</em>, it is cheap and common.</td></tr>
+          <tr><td>comparator</td><td>1 rt delay. Compare: out = rear if rear &gt; max(sides) else 0. Subtract: out = max(0, rear − max(sides)).</td></tr>
+          <tr><td>block power</td><td>Two-tier: <em>strongly</em> powered (by a torch below, repeater facing into it) vs. <em>weakly</em> powered (by dust pointing into it). Only strong power re-emits into adjacent dust. Getting this distinction wrong is the #1 source of simulator/game divergence.</td></tr>
+          <tr><td>update order</td><td>Deterministic: torches and repeaters latch their inputs at tick boundary, then all update simultaneously. Real Java uses a quasi-random block-update order; document that as a known divergence and reject any circuit whose behavior depends on it.</td></tr>
+          <tr><td>torch burnout</td><td>Detect (&gt;8 toggles in 60 game ticks) and <strong>reject the circuit</strong> rather than simulate the burnout. A design that burns out is a bad design.</td></tr>
+          <tr><td>oscillation</td><td>Hash the full state each tick into a rolling set. Repeat state = settled. Cycle of period &gt;1 = oscillating → <code>UNSTABLE</code>, not <code>FAIL</code>. Distinguish these in your metrics; they mean different things about the model.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Evaluation contract</h3>
+<pre>
+<i>// the single function everything else is defined against</i>
+<b>fn</b> evaluate(grid: &amp;Grid, spec: &amp;Spec) -&gt; Verdict
+
+<b>enum</b> Verdict {
+    Pass  { latency_rt: u8, blocks: u16, bbox: (u8,u8,u8) },
+    Fail  { <i>// exact row-level diagnosis, for the replay buffer</i>
+            mismatched_rows: Vec&lt;(Inputs, Observed, Expected)&gt; },
+    Unstable { period_ticks: u8 },
+    Malformed { <i>// caught before simulation, cheap</i>
+            reason: FloatingDust | PortViolation | Overlap | Burnout },
+}
+</pre>
+    <p>Run every input combination to steady state (cap: 200 game ticks) and compare the output port's boolean trace. For an <em>n</em>-input spec that is 2<sup>n</sup> runs; at n ≤ 6 that is 64 sims per candidate, and a Rust core does that in well under a millisecond. Throughput matters enormously here because §06 samples 64 candidates per spec.</p>
+
+    <div class="callout hot">
+      <span class="eyebrow">Fidelity harness — do not skip this</span>
+      <p>Build a headless Minecraft server + a small Fabric mod that accepts a <code>.schem</code> over a socket, places it in a void world, toggles the input levers through all combinations, and reports the output lamp's state. Then run your golden test suite through <strong>both</strong> the Rust simulator and the real game and report agreement as a headline metric.</p>
+      <p>Target: <strong>100% agreement on the golden set, ≥99.5% on 10k random generated circuits.</strong> Publishing that number is what makes the rest of the repo believable. It is also, on its own, a more rigorous artifact than most Minecraft-AI projects contain.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 04 ============ -->
+<section id="data">
+  <div class="s-head">
+    <div class="s-num">04</div>
+    <div>
+      <h2>Synthetic data engine</h2>
+      <div class="s-sub">Why you should not scrape a single schematic</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <p>Scraping community schematics gives you a few thousand unlabeled builds of wildly varying quality, with murky redistribution rights and no reliable description of what each one does. Generating them gives you millions of perfectly-labeled examples with a known difficulty distribution. This is the rare domain where synthetic data is strictly better, and saying so clearly in the README is a good look.</p>
+
+    <h3>Spec DSL</h3>
+    <p>Every example is anchored to a canonical machine-readable spec. Natural language is a <em>view</em> of the spec, generated afterward — never the source of truth.</p>
+<pre>
+spec  := <b>inputs</b> ident+ <b>outputs</b> ident+ constraint* rule+
+rule  := ident <b>=</b> expr
+expr  := ident | <b>¬</b> expr | expr (<b>∧</b>|<b>∨</b>|<b>⊕</b>) expr | <b>(</b> expr <b>)</b>
+        | <b>delay(</b> expr <b>,</b> int <b>)</b>        <i>// int in redstone ticks</i>
+        | <b>strength(</b> expr <b>,</b> int <b>)</b>     <i>// 0..15, for comparator work</i>
+constraint := <b>latency</b> <b>&lt;=</b> int
+        | <b>footprint</b> <b>&lt;=</b> int
+        | <b>region</b> <b>&lt;=</b> int <b>x</b> int
+
+<i>// example</i>
+inputs A B C
+outputs Q
+latency &lt;= 4
+Q = (A ⊕ B) ∧ ¬C
+</pre>
+
+    <h3>Generation procedure</h3>
+    <ol class="tight">
+      <li><strong>Sample a logic DAG.</strong> Pick gate count <em>g</em> ~ uniform(1, 6), input count <em>n</em> ~ uniform(1, 4). Build a random DAG over {AND, OR, NOT, XOR, NAND, NOR} with no unused nodes.</li>
+      <li><strong>Canonicalize.</strong> Reduce to a normal form and hash it. This hash is your deduplication key <em>and</em> your novelty metric later — you must know whether a generated circuit is isomorphic to something in training.</li>
+      <li><strong>Place and route.</strong> A hand-written gate library (each gate as a small voxel stamp with declared input/output pins) plus a simple A*/lee-maze router on the dust layer. Randomize gate variant, orientation, and routing detour so the same spec yields many distinct valid layouts — this is the augmentation that teaches the model there is more than one answer.</li>
+      <li><strong>Verify.</strong> Run §03 on every produced layout. <strong>Discard anything that doesn't pass.</strong> Your placer will be buggy; the verifier catches it. Log the discard rate as a health metric.</li>
+      <li><strong>Paraphrase.</strong> One LLM pass per spec producing 4–8 natural-language phrasings at varied register: terse ("NAND gate"), functional ("light only turns off when both switches are on"), procedural ("invert both inputs then combine them"), and vague ("a two-switch safety interlock"). Cache these; it is a one-time cost.</li>
+      <li><strong>Difficulty stratification.</strong> Bucket by gate count and hold out entire buckets, not random samples — you want to measure extrapolation, not interpolation.</li>
+    </ol>
+
+    <div class="tbl">
+      <table class="data">
+        <thead><tr><th>Split</th><th>Gate count</th><th>Size</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>train</td><td class="n">1–4</td><td class="n">~2.0M layouts</td><td>Main corpus. ~200k unique specs × ~10 layouts each.</td></tr>
+          <tr><td>val</td><td class="n">1–4</td><td class="n">10k</td><td>Unseen <em>specs</em>, seen difficulty. Standard generalization.</td></tr>
+          <tr><td>test-extrap</td><td class="n">5–6</td><td class="n">5k</td><td>Harder than anything in training. The headline number.</td></tr>
+          <tr><td>test-nl</td><td class="n">1–6</td><td class="n">500</td><td><strong>Human-written</strong> prompts, hand-collected. Guards against the model only understanding LLM-flavored paraphrase.</td></tr>
+          <tr><td>test-repair</td><td class="n">1–4</td><td class="n">2k</td><td>Working circuits with 1–8 blocks corrupted. Measures inpainting (§05).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn">
+      <span class="eyebrow">The obvious failure mode</span>
+      <p>If your placer only ever builds gates in one canonical orientation, the model learns your placer, not redstone. Aggressively randomize: mirror, rotate, insert redundant repeaters, take scenic routes, vary substrate. Then measure it — if generated circuits are &gt;60% isomorphic to a training layout, your augmentation is too weak.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 05 ============ -->
+<section id="model">
+  <div class="s-head">
+    <div class="s-num">05</div>
+    <div>
+      <h2>The model</h2>
+      <div class="s-sub">Autoregressive baseline, discrete diffusion as the real thing</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <p>Ship two. The autoregressive model is a two-day sanity check that your data pipeline works. The diffusion model is the one that earns the repo, because <em>masked diffusion gives you inpainting for free</em> — and inpainting is what turns this from a demo into a tool people actually use ("my circuit is broken, fix this region").</p>
+
+    <div class="split">
+      <div class="card">
+        <h3>Baseline · autoregressive</h3>
+        <p>Decoder-only transformer, prefix-LM over the spec tokens then raster-order block prediction.</p>
+        <ul>
+          <li>12 layers, d_model 384, 6 heads, SwiGLU</li>
+          <li>RoPE on the sequence + learned 3D positional embedding added at input</li>
+          <li>~25M params, seq 1568</li>
+          <li>Trains in a few hours on 10–12 GB VRAM</li>
+        </ul>
+        <p>Purpose: prove the data teaches something. Expect mediocre pass rates and no inpainting. Keep it in the repo as a documented baseline.</p>
+      </div>
+      <div class="card">
+        <h3>Main · masked discrete diffusion</h3>
+        <p>Absorbing-state diffusion (MaskGIT / MDLM-style) over the same token grid.</p>
+        <ul>
+          <li>Bidirectional encoder, same width/depth as above</li>
+          <li>Forward process: independently replace tokens with MASK at rate <em>t</em></li>
+          <li>Loss: cross-entropy on masked positions only, weighted 1/<em>t</em></li>
+          <li>Sampling: 16–32 steps, confidence-ordered unmasking</li>
+        </ul>
+        <p>Why it wins: order-agnostic, so any subset of the grid can be conditioning. Repair, extension, and constrained placement are the same operation.</p>
+      </div>
+    </div>
+
+    <h3>Conditioning</h3>
+    <ol class="tight">
+      <li><strong>Canonical spec path (primary).</strong> Tokenize the DSL directly into ≤32 prefix tokens with its own small vocabulary. Exact, cheap, and what the verifier loop uses internally.</li>
+      <li><strong>Natural language path.</strong> A frozen sentence encoder (MiniLM-class, ~22M params, runs on CPU) → linear projection → 8 prefix tokens. Frozen keeps VRAM free for the generator and stops the text tower from overfitting your paraphrase style.</li>
+      <li><strong>Classifier-free guidance.</strong> Drop the conditioning 10% of the time during training; at sampling, guidance scale 1.5–3.0. On discrete diffusion this is a logit-space interpolation. Expect this to be one of your largest single wins — worth an ablation figure.</li>
+    </ol>
+
+    <h3>Loss weighting — the air problem</h3>
+    <p>85% of tokens are air. Unweighted cross-entropy will happily converge to a model that emits empty grids and reports excellent loss. Mitigations, in order of preference:</p>
+    <ul class="tight">
+      <li>Inverse-frequency class weights, clipped at 10×, on the non-air vocabulary.</li>
+      <li>Report <strong>per-class</strong> accuracy and functional pass rate in every eval. Never let aggregate token accuracy be the headline — it will read ~97% while the model produces nothing that works.</li>
+      <li>Optional and worth trying: crop each training grid to its occupied bounding box + 1 block of padding, and predict the bbox dims as part of the prefix. Cuts sequence length ~4× and removes most of the air.</li>
+    </ul>
+
+    <div class="callout">
+      <span class="eyebrow">Structural priors worth trying (each a clean ablation)</span>
+      <p><strong>Layer-factored attention:</strong> alternate blocks attending within a y-layer and across layers at fixed (x,z). Cheaper than full attention over 1536 tokens and matches the geometry.<br>
+      <strong>Legality masking at sample time:</strong> zero the logits of block states that are physically impossible at that position (dust with no support below, lever off the input face). Free correctness, no training cost.<br>
+      <strong>Signal-strength auxiliary head:</strong> predict the simulator's steady-state power value at each cell as a second output. Forces the representation to encode propagation rather than texture. This is the most interesting idea in this section and I'd prioritize the ablation.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 06 ============ -->
+<section id="loop">
+  <div class="s-head">
+    <div class="s-num">06</div>
+    <div>
+      <h2>Verifier-guided self-improvement</h2>
+      <div class="s-sub">The loop that makes this a research contribution</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <p>Everything up to here is competent engineering. This is the part that's new: because the verifier is exact and free, the model can be trained on its own successful output indefinitely, with a monotone quality guarantee and a curve you can plot.</p>
+<pre>
+<b>for</b> round <b>in</b> 1..R:
+    accepted, negatives = [], []
+
+    <b>for</b> spec <b>in</b> sample_specs(n=20_000, difficulty=curriculum[round]):
+        cands  = model.sample(spec, k=64, guidance=2.0, temp=0.9)
+        graded = [verifier.evaluate(c, spec) <b>for</b> c <b>in</b> cands]
+
+        passing = [c <b>for</b> c,v <b>in</b> zip(cands,graded) <b>if</b> v.is_pass()]
+        <b>if</b> passing:
+            <i># dedupe by canonical layout hash, then keep the best few</i>
+            passing = dedupe(passing)
+            passing.sort(key=<b>lambda</b> c: (c.blocks, c.latency_rt))
+            accepted += [(spec, c) <b>for</b> c <b>in</b> passing[:4]]
+        <b>else</b>:
+            <i># near-misses are the most informative failures</i>
+            near = min(graded, key=<b>lambda</b> v: len(v.mismatched_rows))
+            <b>if</b> len(near.mismatched_rows) == 1:
+                negatives.append((spec, near))
+
+    <i># the actual objective: preference over verified quality</i>
+    dataset = accepted + repair_pairs(negatives)   <i># see below</i>
+    model.finetune(dataset, epochs=1, lr=1e-5)
+
+    log(round, pass_at_1=eval(val), pass_at_1=eval(test_extrap),
+        mean_blocks=..., novelty=..., unstable_rate=...)
+</pre>
+
+    <h3>Three things that make the loop actually improve</h3>
+    <ol class="tight">
+      <li><strong>Compactness as a secondary objective.</strong> Among passing candidates, prefer fewer blocks and lower latency. This is what pushes the model past the procedural placer — the placer routes correctly but wastefully, and the loop can discover layouts the placer's heuristics can't express. <em>This is your central empirical claim: the learned model finds circuits smaller than the compiler that generated its training data.</em></li>
+      <li><strong>Repair pairs from failures.</strong> A candidate failing exactly one truth-table row is usually one or two blocks from correct. Diff it against a known-good layout for the same spec and emit a masked-inpainting training example: the corrupted region masked, the correct blocks as target. Failures become supervision instead of waste.</li>
+      <li><strong>Curriculum by acceptance rate.</strong> Advance the difficulty distribution when round-level pass@1 crosses a threshold (say 0.6). Advancing too early collapses acceptance to near-zero and the loop starves; too late and it overfits easy specs. Log the acceptance rate per bucket every round — this is your main diagnostic.</li>
+    </ol>
+    <div class="callout warn">
+      <span class="eyebrow">Watch for diversity collapse</span>
+      <p>Self-training on filtered samples is a known mode-collapse machine. The model will find one layout per gate type and emit it forever, with a beautiful pass rate and zero novelty. Defend on three fronts: dedupe accepted samples by canonical hash before training, mix in a fixed 25% of original synthetic data every round, and <strong>make distinct-layouts-per-spec a first-class tracked metric</strong>. If it trends down, the loop is failing even while pass@1 rises.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 07 ============ -->
+<section id="eval">
+  <div class="s-head">
+    <div class="s-num">07</div>
+    <div>
+      <h2>Evaluation</h2>
+      <div class="s-sub">Metrics, and the baselines you must not dodge</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <div class="tbl">
+      <table class="data">
+        <thead><tr><th>Metric</th><th>Definition</th><th>Why it's in the table</th></tr></thead>
+        <tbody>
+          <tr><td>pass@1 / @8 / @64</td><td>Fraction of specs with ≥1 verified-correct sample in k draws</td><td>The headline. Report all three — the gap between @1 and @64 tells you whether the problem is capability or calibration.</td></tr>
+          <tr><td>extrapolation pass@8</td><td>Same, on 5–6 gate held-out buckets</td><td>Distinguishes learned composition from memorized layouts. Expect a large drop; report it honestly.</td></tr>
+          <tr><td>compactness ratio</td><td>blocks(model) / blocks(procedural reference)</td><td>Your central claim. &lt;1.0 means the model beat its own teacher.</td></tr>
+          <tr><td>latency ratio</td><td>Same for redstone-tick delay</td><td>Second axis of quality; sometimes trades against compactness. Plot the Pareto front.</td></tr>
+          <tr><td>novelty rate</td><td>1 − (fraction isomorphic to any training layout)</td><td>Guards against the whole thing being a retrieval system in a trenchcoat.</td></tr>
+          <tr><td>repair success@1</td><td>Corrupted circuit → correct after single inpainting pass</td><td>The most useful capability for actual players. Likely your best demo.</td></tr>
+          <tr><td>malformed rate</td><td>Rejected pre-simulation (floating dust, overlaps)</td><td>Measures whether the model learned physical validity at all. Should approach 0 fast.</td></tr>
+          <tr><td>unstable rate</td><td>Oscillating outputs</td><td>Tracked separately from FAIL. A rising unstable rate during §06 is an early collapse warning.</td></tr>
+          <tr><td>sim↔game agreement</td><td>Verdict match vs. real Minecraft (§03 harness)</td><td>Validates every other row in this table.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Baselines</h3>
+    <div class="split">
+      <div class="card">
+        <h3>1 · Procedural compiler</h3>
+        <p>Espresso-style two-level minimization → gate library → router. The same machinery that made your training data.</p>
+        <p><strong>It will beat you on correctness. Say so.</strong> A compiler is correct by construction; pass@1 = 1.0 within its coverage. Your argument is not correctness — it's compactness, natural-language flexibility, repair, and layouts outside the compiler's expressible space.</p>
+      </div>
+      <div class="card">
+        <h3>2 · Frontier LLM, prompted</h3>
+        <p>Give a strong general model the spec plus the grid format and ask for a schematic. Run its output through the identical verifier.</p>
+        <p>Expect a low single-digit pass rate — LLMs have essentially no spatial model of signal propagation. A clean, fairly-run comparison here is a genuinely publishable observation and the most shareable chart in the repo.</p>
+      </div>
+      <div class="card">
+        <h3>3 · Retrieval</h3>
+        <p>Nearest-neighbor over training specs by embedding, return that layout verbatim.</p>
+        <p>Cheap and surprisingly strong on in-distribution specs. If your model can't clearly beat retrieval on the extrapolation split, you have not yet built a generative model of circuits.</p>
+      </div>
+      <div class="card">
+        <h3>4 · Unconditional + rejection</h3>
+        <p>Sample ignoring the spec, keep whatever happens to verify.</p>
+        <p>An ablation, not a competitor. It isolates how much of your pass rate comes from conditioning versus from the verifier filtering a firehose.</p>
+      </div>
+    </div>
+    <div class="callout hot">
+      <span class="eyebrow">The figure that will get this shared</span>
+      <p>A Pareto scatter: block count on x, latency on y, one cloud per method (compiler / retrieval / LLM / your model at rounds 1, 3, 5). Every point is a verified-correct circuit. If your round-5 cloud sits down-left of the compiler's, the project's thesis is demonstrated in a single image with no prose required.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 08 ============ -->
+<section id="repo">
+  <div class="s-head">
+    <div class="s-num">08</div>
+    <div>
+      <h2>Repository &amp; plan</h2>
+      <div class="s-sub">Layout, and a build order that always has something working</div>
+    </div>
+  </div>
+  <div class="s-body">
+<pre>
+dustc/
+├── crates/
+│   └── redsim/                 <i>Rust core — the verifier</i>
+│       ├── src/grid.rs         <i>block-state enum, 16×6×16 dense array</i>
+│       ├── src/power.rs        <i>multi-source BFS dust solver</i>
+│       ├── src/tick.rs         <i>latch → update → settle loop</i>
+│       ├── src/verdict.rs      <i>truth-table comparison, diagnosis</i>
+│       ├── src/lib.rs          <i>PyO3 bindings</i>
+│       └── tests/golden/       <b>~120 hand-built circuits + expected verdicts</b>
+├── dustc/
+│   ├── spec/                   <i>DSL parser, canonicalizer, hashing</i>
+│   ├── synth/                  <i>gate library (YAML), placer, lee router</i>
+│   ├── data/                   <i>corpus build, splits, paraphrase cache</i>
+│   ├── models/ar.py            <i>autoregressive baseline</i>
+│   ├── models/mdm.py           <i>masked discrete diffusion (main)</i>
+│   ├── train/loop.py           <i>§06 verifier-guided rounds</i>
+│   ├── eval/                   <i>metrics + all four baselines</i>
+│   └── io/                     <i>.schem / .litematic read+write</i>
+├── harness/
+│   ├── mod/                    <i>Fabric mod: socket → place → toggle → report</i>
+│   └── compare.py              <i>sim ↔ game agreement report</i>
+├── viewer/                     <i>tiny WebGL grid viewer for the README gifs</i>
+├── configs/                    <i>hydra/yaml: 25m-ar, 25m-mdm, loop-r5</i>
+├── notebooks/00_sim_tour.ipynb <i>the thing people will actually open first</i>
+└── README.md
+</pre>
+
+    <ul class="milestones">
+      <li><span class="m-tag">Week 1</span><span class="m-body"><b>Simulator + golden tests</b><span>Rust core, dust/torch/repeater only. 120 hand-built circuits with hand-verified verdicts. No Python, no model.</span><em>Ship gate: golden suite green, &lt;1 ms per 4-input evaluation.</em></span></li>
+      <li><span class="m-tag">Week 2</span><span class="m-body"><b>Fidelity harness</b><span>Fabric mod + comparison script. Fix every divergence — most will be weak-vs-strong power.</span><em>Ship gate: 100% agreement on golden set. Publish this number.</em></span></li>
+      <li><span class="m-tag">Week 3</span><span class="m-body"><b>Spec DSL + synthesizer</b><span>Parser, canonicalizer, gate library, router. Every output validated by the week-1 simulator.</span><em>Ship gate: 100k verified layouts, placer discard rate &lt;5%.</em></span></li>
+      <li><span class="m-tag">Week 4</span><span class="m-body"><b>Corpus + AR baseline</b><span>Full 2M corpus, paraphrases, splits. Train the autoregressive model.</span><em>Ship gate: any non-zero pass@8 on val. Non-zero is the whole bar here.</em></span></li>
+      <li><span class="m-tag">Week 5–6</span><span class="m-body"><b>Discrete diffusion + CFG</b><span>Main model, guidance sweep, legality masking, inpainting evaluation.</span><em>Ship gate: beats AR baseline and retrieval on val pass@8.</em></span></li>
+      <li><span class="m-tag">Week 7–8</span><span class="m-body"><b>Verifier loop, rounds 1–5</b><span>Self-improvement with compactness preference and repair pairs. Full metric logging per round.</span><em>Ship gate: monotone pass@1 across rounds, novelty not collapsing.</em></span></li>
+      <li><span class="m-tag">Week 9</span><span class="m-body"><b>Baselines + the Pareto figure</b><span>Compiler, prompted LLM, retrieval, unconditional. All through the same verifier.</span><em>Ship gate: the scatter plot exists and says something true.</em></span></li>
+      <li><span class="m-tag">Week 10</span><span class="m-body"><b>Release</b><span>README with gifs, notebook tour, model weights, dataset card, the sim↔game number up top.</span><em>Ship gate: a stranger can go prompt → circuit in their world in under 10 minutes.</em></span></li>
+    </ul>
+    <div class="callout">
+      <span class="eyebrow">On the README</span>
+      <p>Lead with a gif of a typed sentence becoming a working circuit in an actual Minecraft world, then the sim↔game agreement number, then the Pareto figure. Put the honest limitations section high, not buried — "combinational only, 16×16×6, no pistons, no quasi-connectivity" reads as rigor when you volunteer it and as a gotcha when someone else finds it.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 09 ============ -->
+<section id="hw">
+  <div class="s-head">
+    <div class="s-num">09</div>
+    <div>
+      <h2>Hardware notes</h2>
+      <div class="s-sub">RX 6700 specifics, and why it barely matters</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <p>The RX 6700 is RDNA 2 (Navi 22, <code>gfx1031</code>) and is not on AMD's officially supported ROCm list — as of ROCm 7.2 that list starts at RDNA 3. It nonetheless works in practice via the gfx1030 override, and the good news is that <strong>this project is unusually forgiving of a modest GPU</strong>: a 48-token vocabulary and a 25M-parameter model is a tiny workload by 2026 standards. Your bottleneck will be the CPU-side verifier throughput in §06, not the GPU.</p>
+<pre>
+<i># Linux only — ROCm on Windows is not viable for training</i>
+<i># Ubuntu 24.04 or 22.04</i>
+
+<b>export</b> HSA_OVERRIDE_GFX_VERSION=10.3.0   <i># present gfx1031 as gfx1030</i>
+<b>export</b> PYTORCH_HIP_ALLOC_CONF=expandable_segments:True
+
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.4
+
+<i># verify</i>
+python -c "import torch;print(torch.cuda.is_available(),torch.cuda.get_device_name(0))"
+</pre>
+    <div class="tbl">
+      <table class="data">
+        <thead><tr><th>Concern</th><th>Reality on this card</th></tr></thead>
+        <tbody>
+          <tr><td>VRAM</td><td>10 GB (6700) is comfortable for 25M params at seq 1568, batch 24–32 with bf16 autocast. If tight, enable gradient checkpointing or crop to bounding box (§05).</td></tr>
+          <tr><td>Flash attention</td><td>Do not count on it at gfx1031. Use PyTorch SDPA and let it fall back to the math kernel; at seq 1568 the difference is tolerable.</td></tr>
+          <tr><td><code>torch.compile</code></td><td>Try it, but expect breakage on unsupported archs. Keep an eager-mode path as the default in configs.</td></tr>
+          <tr><td>bf16</td><td>RDNA 2 lacks proper bf16 matrix support. Prefer fp16 with a GradScaler, or fp32 — at this model size fp32 is genuinely fine and removes a whole class of NaN debugging.</td></tr>
+          <tr><td>Verifier parallelism</td><td>This is your real scaling axis. Rust + rayon across all cores; 64 candidates × 16 truth-table rows per spec adds up fast. Budget more optimization effort here than on the GPU path.</td></tr>
+          <tr><td>Escape hatch</td><td>A single rented A100-hour will train the main model end to end. Keep the code device-agnostic so a stranger with an NVIDIA box can reproduce you — that matters for the repo's reach.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 10 ============ -->
+<section id="faq">
+  <div class="s-head">
+    <div class="s-num">10</div>
+    <div>
+      <h2>Objections</h2>
+      <div class="s-sub">Answer these in the README before anyone asks</div>
+    </div>
+  </div>
+  <div class="s-body">
+    <div class="split">
+      <div class="card">
+        <h3>"Just write a compiler."</h3>
+        <p>Correct — and you did, it's the baseline. A compiler needs formal input, emits one layout per spec in a style its author hardcoded, and cannot repair a build a player half-finished. The learned model takes vague natural language, produces a distribution over layouts, fills in gaps, and — per §07 — finds smaller circuits than the compiler that taught it. Those are different tools. Shipping both and comparing them is the strength, not a weakness.</p>
+      </div>
+      <div class="card">
+        <h3>"This is just synthetic data on a solved problem."</h3>
+        <p>Logic synthesis is solved. <em>Spatial</em> logic synthesis under Minecraft's propagation rules, from natural language, with repair, is not. And the closed verifier loop is the interesting object here regardless of domain — redstone is a rare setting where the reward is exact, free, and fast, which makes it a clean testbed for verifier-guided generation generally.</p>
+      </div>
+      <div class="card">
+        <h3>"Why not use the real game as the simulator?"</h3>
+        <p>Throughput. §06 needs on the order of 10<sup>8</sup> evaluations per round; a game instance does maybe 10<sup>2</sup>/second. The Rust core does 10<sup>6</sup>. The fidelity harness (§03) is how you get the speed without giving up ground truth.</p>
+      </div>
+      <div class="card">
+        <h3>"Won't the model just memorize gates?"</h3>
+        <p>Probably, at first — which is why the novelty rate and the 5–6 gate extrapolation split are tracked from day one rather than added when a reviewer asks. If it turns out to be pure memorization, publish that: a clean negative result with this much measurement around it is more useful than most positive ones.</p>
+      </div>
+    </div>
+
+    <div class="callout hot">
+      <span class="eyebrow">Three stretch goals, in order of how much they'd raise the ceiling</span>
+      <p><strong>Sequential logic.</strong> Latches, counters, clocks, pistons. Requires quasi-connectivity in the simulator and temporal specs in the DSL. This is the natural v2 and roughly doubles the project's scope and its interest.<br>
+      <strong>Live in-game copilot.</strong> Fabric mod that ghost-renders a suggested completion of whatever you're currently building, using the inpainting path. This is what would actually get players using it.<br>
+      <strong>Spec inference.</strong> Invert the model: feed it a circuit, get back the DSL spec describing what it does. "Explain this contraption I found" is a feature no tool currently offers, and the verifier gives you exact labels to train it on for free.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>Redstone Whisperer / dustc — design specification rev 0.3. Scope: combinational logic, 16×6×16, Java-edition semantics, no quasi-connectivity. Build the simulator first.</p>
+</footer>
+
+</div><!-- /pad -->
+</main>
+</div><!-- /shell -->
+
+<script>
+(function(){
+  "use strict";
+
+  var W = 14, H = 5;
+
+  // ---- candidate layouts (planar top-down abstraction) -------------------
+  // . air   # solid   d dust   t torch   > repeater(+x)   A/B lever   L lamp
+  var CANDIDATES = [
+    { name:"cand 07", note:"merged before inverting — this is NOR, not NAND",
+      rows:[ "..............",
+             "Adddd#tdddL...",
+             "....d.........",
+             "Bdddd.........",
+             ".............." ] },
+    { name:"cand 23", note:"correct, but two repeaters and 18 blocks",
+      rows:[ "..............",
+             "Add#tdd>ddddL.",
+             "...........d..",
+             "Bdd#tdd>dddd..",
+             ".............." ] },
+    { name:"cand 41", note:"correct and 4 blocks smaller — accepted",
+      rows:[ "..............",
+             "Add#tdddddL...",
+             ".........d....",
+             "Bdd#tddddd....",
+             ".............." ] }
+  ];
+
+  var WANT = [1,1,1,0];                 // NAND truth table for (A,B) = 00,01,10,11
+  var INPUTS = [[0,0],[0,1],[1,0],[1,1]];
+
+  // ---- grid parsing -----------------------------------------------------
+  function parse(rows){
+    var cells = [];
+    for(var z=0; z<H; z++){
+      for(var x=0; x<W; x++){
+        var ch = rows[z][x] || ".";
+        cells.push({ ch:ch, x:x, z:z });
+      }
+    }
+    return cells;
+  }
+  function idx(x,z){ return z*W + x; }
+  function nbrs(x,z){
+    var out=[];
+    if(x>0)    out.push(idx(x-1,z));
+    if(x<W-1)  out.push(idx(x+1,z));
+    if(z>0)    out.push(idx(x,z-1));
+    if(z<H-1)  out.push(idx(x,z+1));
+    return out;
+  }
+
+  // ---- the simulator ----------------------------------------------------
+  // Fixed-point over torch/repeater states; dust solved by multi-source BFS.
+  function steady(cells, a, b){
+    var n = cells.length;
+    var torchOn = {}, repOn = {};
+    var i, c;
+    for(i=0;i<n;i++){
+      if(cells[i].ch==="t") torchOn[i] = true;   // torches start lit
+      if(cells[i].ch===">") repOn[i] = false;
+    }
+
+    var strength = new Array(n).fill(0);
+    var depth    = new Array(n).fill(-1);
+    var seen = {}, oscillates = false, settledAt = 0;
+
+    for(var iter=0; iter<40; iter++){
+      // 1. collect emitters
+      var queue = [], dist = {};
+      for(i=0;i<n;i++){
+        c = cells[i];
+        var emits = false;
+        if(c.ch==="A" && a) emits = true;
+        if(c.ch==="B" && b) emits = true;
+        if(c.ch==="t" && torchOn[i]) emits = true;
+        if(c.ch===">" && repOn[i]) emits = true;
+        if(emits){
+          // repeaters emit only forward (+x)
+          var targets = (c.ch===">") ? (c.x<W-1 ? [idx(c.x+1,c.z)] : []) : nbrs(c.x,c.z);
+          for(var k=0;k<targets.length;k++){
+            var t = targets[k];
+            if(cells[t].ch==="d" && dist[t]===undefined){
+              dist[t] = 15; queue.push(t);
+            }
+          }
+        }
+      }
+      // 2. BFS dust decay
+      strength = new Array(n).fill(0);
+      depth    = new Array(n).fill(-1);
+      var head = 0, d0 = 0;
+      var frontier = queue.slice();
+      var layer = 0;
+      while(frontier.length){
+        var next = [];
+        for(var q=0;q<frontier.length;q++){
+          var cur = frontier[q];
+          var s = dist[cur];
+          if(s <= strength[cur]) continue;
+          strength[cur] = s;
+          depth[cur] = layer;
+          if(s > 1){
+            var nb = nbrs(cells[cur].x, cells[cur].z);
+            for(var m=0;m<nb.length;m++){
+              var tn = nb[m];
+              if(cells[tn].ch==="d" && strength[tn] < s-1){
+                dist[tn] = Math.max(dist[tn]||0, s-1);
+                next.push(tn);
+              }
+            }
+          }
+        }
+        frontier = next; layer++;
+        if(layer>60) break;
+      }
+
+      // 3. block power (simplified: adjacent powered dust or on lever)
+      var blockPowered = {};
+      for(i=0;i<n;i++){
+        if(cells[i].ch!=="#") continue;
+        var nb2 = nbrs(cells[i].x, cells[i].z), p=false;
+        for(var j=0;j<nb2.length;j++){
+          var o = nb2[j];
+          if(cells[o].ch==="d" && strength[o]>0) p=true;
+          if(cells[o].ch==="A" && a) p=true;
+          if(cells[o].ch==="B" && b) p=true;
+        }
+        if(p) blockPowered[i]=true;
+      }
+
+      // 4. update torches (inverting, delayed) and repeaters
+      var nextTorch = {}, nextRep = {};
+      for(i=0;i<n;i++){
+        if(cells[i].ch==="t"){
+          var nb3 = nbrs(cells[i].x, cells[i].z), attached=false;
+          for(var j3=0;j3<nb3.length;j3++){
+            if(cells[nb3[j3]].ch==="#" && blockPowered[nb3[j3]]) attached=true;
+          }
+          nextTorch[i] = !attached;
+        }
+        if(cells[i].ch===">"){
+          var left = cells[i].x>0 ? idx(cells[i].x-1, cells[i].z) : -1;
+          nextRep[i] = (left>=0 && cells[left].ch==="d" && strength[left]>0);
+        }
+      }
+
+      var key = JSON.stringify([nextTorch,nextRep]);
+      if(seen[key]!==undefined){
+        if(iter - seen[key] > 1) oscillates = true;
+        settledAt = iter;
+        torchOn = nextTorch; repOn = nextRep;
+        break;
+      }
+      seen[key] = iter;
+      torchOn = nextTorch; repOn = nextRep;
+      settledAt = iter;
+    }
+
+    // 5. lamp
+    var lamp = false;
+    for(i=0;i<n;i++){
+      if(cells[i].ch!=="L") continue;
+      var nb4 = nbrs(cells[i].x, cells[i].z);
+      for(var j4=0;j4<nb4.length;j4++){
+        var o4 = nb4[j4];
+        if(cells[o4].ch==="d" && strength[o4]>0) lamp = true;
+        if(cells[o4].ch==="t" && torchOn[o4]) lamp = true;
+        if(cells[o4].ch===">" && repOn[o4] && cells[o4].x === cells[i].x-1) lamp = true;
+      }
+    }
+
+    var maxDepth = 0;
+    for(i=0;i<n;i++) if(depth[i]>maxDepth) maxDepth = depth[i];
+
+    return { strength:strength, depth:depth, torchOn:torchOn, repOn:repOn,
+             lamp:lamp, oscillates:oscillates, maxDepth:maxDepth };
+  }
+
+  // ---- rendering --------------------------------------------------------
+  var gridEl  = document.getElementById("cgrid");
+  var rampEl  = document.getElementById("ramp");
+  var ttBody  = document.getElementById("ttbody");
+  var stampEl = document.getElementById("stamp");
+  var statEl  = document.getElementById("vstat");
+  if(!gridEl) return;
+
+  function rampColor(s){
+    if(s<=0) return null;
+    var f = (s-1)/14;
+    var l = 20 + f*38, sat = 42 + f*52, h = 6 - f*5;
+    return "hsl("+h+","+sat+"%,"+l+"%)";
+  }
+
+  for(var s=15;s>=1;s--){
+    var i2 = document.createElement("i");
+    i2.style.background = rampColor(s);
+    rampEl.appendChild(i2);
+  }
+
+  gridEl.style.gridTemplateColumns = "repeat("+W+",20px)";
+  var cellEls = [];
+  for(var ci=0; ci<W*H; ci++){
+    var el = document.createElement("div");
+    el.className = "cell air";
+    gridEl.appendChild(el);
+    cellEls.push(el);
+  }
+
+  var LABEL = { "A":"A", "B":"B", "t":"◆", ">":"▶", "L":"◍" };
+
+  function draw(cells, st, a, b, revealDepth){
+    for(var i=0;i<cells.length;i++){
+      var c = cells[i], el = cellEls[i], cls = "cell", txt = "", bg = "";
+      switch(c.ch){
+        case ".": cls += " air"; break;
+        case "#": cls += " block"; break;
+        case "d":
+          cls += " dust";
+          var vis = st && st.depth[i] >= 0 && st.depth[i] <= revealDepth;
+          if(vis && st.strength[i] > 0) bg = rampColor(st.strength[i]);
+          break;
+        case "A": cls += " lever" + (a ? " on" : ""); txt = "A"; break;
+        case "B": cls += " lever" + (b ? " on" : ""); txt = "B"; break;
+        case "t": cls += " torch" + (st && st.torchOn[i] ? " on" : ""); txt = "◆"; break;
+        case ">": cls += " rep" + (st && st.repOn[i] ? " on" : ""); txt = "▶"; break;
+        case "L":
+          var lampLit = st && st.lamp && revealDepth >= st.maxDepth;
+          cls += " lamp" + (lampLit ? " on" : ""); txt = "◍"; break;
+      }
+      el.className = cls;
+      el.style.background = bg || "";
+      el.textContent = txt;
+    }
+  }
+
+  function resetTable(){
+    ttBody.innerHTML = "";
+    for(var r=0;r<4;r++){
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>"+INPUTS[r][0]+"</td><td>"+INPUTS[r][1]+"</td>"+
+                     "<td class='pending'>·</td><td>"+WANT[r]+"</td><td class='pending'>·</td>";
+      ttBody.appendChild(tr);
+    }
+  }
+
+  function setRow(r, observed, ok, active){
+    var tr = ttBody.children[r];
+    if(!tr) return;
+    tr.className = active ? "active" : "";
+    var cells2 = tr.children;
+    cells2[2].textContent = observed;
+    cells2[2].className = "";
+    cells2[4].textContent = ok ? "✓" : "✗";
+    cells2[4].className = ok ? "mark-ok" : "mark-no";
+  }
+
+  // ---- animation --------------------------------------------------------
+  var reduce = window.matchMedia &&
+               window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var accepted = 0, candIdx = 0, timers = [];
+
+  function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
+  function after(ms, fn){ timers.push(setTimeout(fn, ms)); }
+
+  function runCandidate(k){
+    var cand = CANDIDATES[k];
+    var cells = parse(cand.rows);
+    resetTable();
+    stampEl.className = "stamp";
+    stampEl.innerHTML = "simulating<small>" + cand.name + " · propagating signal…</small>";
+    statEl.innerHTML = "candidate <b>" + cand.name.replace("cand ","") +
+                       "/64</b> · accepted <b>" + accepted + "</b>";
+
+    var t = 0, allOk = true;
+    INPUTS.forEach(function(pair, r){
+      var st = steady(cells, pair[0], pair[1]);
+      var obs = st.lamp ? 1 : 0;
+      var ok = (obs === WANT[r]) && !st.oscillates;
+      if(!ok) allOk = false;
+
+      var steps = Math.max(1, st.maxDepth + 1);
+      for(var d=0; d<=steps; d++){
+        (function(dd){
+          after(t, function(){ draw(cells, st, pair[0], pair[1], dd); });
+        })(d);
+        t += 70;
+      }
+      after(t, function(){ setRow(r, obs, ok, true); });
+      t += 340;
+    });
+
+    after(t, function(){
+      for(var r=0;r<4;r++) ttBody.children[r].className = "";
+      if(allOk){
+        accepted++;
+        stampEl.className = "stamp pass";
+        stampEl.innerHTML = "verified pass<small>" + cand.note + "</small>";
+      } else {
+        stampEl.className = "stamp fail";
+        stampEl.innerHTML = "rejected<small>" + cand.note + "</small>";
+      }
+      statEl.innerHTML = "candidate <b>" + cand.name.replace("cand ","") +
+                         "/64</b> · accepted <b>" + accepted + "</b>";
+    });
+    t += 2200;
+
+    after(t, function(){
+      candIdx = (candIdx + 1) % CANDIDATES.length;
+      if(candIdx === 0) accepted = 0;
+      clearTimers();
+      runCandidate(candIdx);
+    });
+  }
+
+  if(reduce){
+    // static final state: the accepted candidate, fully resolved
+    var cand = CANDIDATES[2], cells = parse(cand.rows);
+    resetTable();
+    var st = steady(cells, 1, 1);
+    draw(cells, st, 1, 1, 99);
+    INPUTS.forEach(function(pair, r){
+      var s2 = steady(cells, pair[0], pair[1]);
+      var obs = s2.lamp ? 1 : 0;
+      setRow(r, obs, obs === WANT[r], false);
+    });
+    stampEl.className = "stamp pass";
+    stampEl.innerHTML = "verified pass<small>" + cand.note + "</small>";
+    statEl.innerHTML = "candidate <b>41/64</b> · accepted <b>1</b>";
+  } else {
+    runCandidate(0);
+  }
+})();
+</script>
+</body>
+</html>

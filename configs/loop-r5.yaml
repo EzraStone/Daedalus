@@ -1,0 +1,44 @@
+# Verifier-guided self-improvement, five rounds.
+name: loop-r5
+
+loop:
+  rounds: 5
+  specs_per_round: 20000
+  candidates_per_spec: 64
+  keep_per_spec: 4
+  guidance: 2.0
+  temperature: 0.9
+
+  # Advance the curriculum on merit, never on a schedule. Advancing early
+  # collapses acceptance to near zero and the loop starves.
+  advance_threshold: 0.6
+  curriculum:
+    - [1, 2]
+    - [1, 3]
+    - [1, 4]
+    - [2, 5]
+    - [3, 6]
+
+  # Self-training on filtered samples is a known mode-collapse machine. This is
+  # the cheapest of the three defences and the one that costs nothing to keep
+  # on; the others are dedup-by-canonical-hash (always on) and tracking
+  # layouts-per-spec as a first-class metric.
+  anchor_fraction: 0.25
+
+finetune:
+  epochs: 1
+  lr: 1.0e-5
+  batch_size: 24
+
+# Metrics logged every round. layouts_per_spec and novelty are the collapse
+# alarm: if they fall while pass@1 rises, the loop is failing even though the
+# headline number says otherwise.
+log:
+  - pass_at_1
+  - pass_at_k
+  - mean_blocks
+  - mean_latency_rt
+  - layouts_per_spec
+  - novelty
+  - unstable_rate
+  - malformed_rate

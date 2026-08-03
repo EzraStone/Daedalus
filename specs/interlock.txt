@@ -1,0 +1,5 @@
+# "the lamp lights only when both switches are on and the override is off"
+inputs A B C
+outputs Q
+latency <= 6
+Q = A ∧ B ∧ ¬C

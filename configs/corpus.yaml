@@ -1,0 +1,29 @@
+# Corpus construction. Sizes are the design's table; `--scale` shrinks them for
+# a smoke run.
+name: corpus-v1
+
+sample:
+  min_inputs: 1
+  max_inputs: 4
+  negation_rate: 0.35
+  constraint_rate: 0.15
+  # XOR is omitted by default: its netlist needs a wire crossing and the planar
+  # router cannot build one. Including it would mean a third of the corpus
+  # silently failing to route.
+  gate_set: [and, or]
+
+splits:
+  - {name: train,        gates: [1, 4], specs: 200000, layouts_per_spec: 10}
+  - {name: val,          gates: [1, 4], specs: 10000,  layouts_per_spec: 1}
+  - {name: test-extrap,  gates: [5, 6], specs: 5000,   layouts_per_spec: 1}
+  - {name: test-repair,  gates: [1, 4], specs: 2000,   layouts_per_spec: 1}
+  # Hand-collected. Guards against the model only understanding the template
+  # paraphraser's idiom -- which it will, if nothing checks.
+  - {name: test-nl,      gates: [1, 6], specs: 500,    layouts_per_spec: 1, human_written: true}
+
+paraphrase:
+  per_spec: [4, 8]
+  registers: [terse, functional, procedural, vague]
+  # An LLM pass is a one-time cost per spec and is cached; templates are the
+  # default so a build needs no API key and stays reproducible.
+  use_llm: false

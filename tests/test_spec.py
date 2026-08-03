@@ -7,7 +7,7 @@ import random
 import pytest
 
 from daedalus.spec import PlacementError, Spec, SpecSyntaxError
-from daedalus.spec.canon import irrelevant_inputs, is_constant, restrict, table_text
+from daedalus.spec.canon import irrelevant_inputs, is_constant, restrict
 from daedalus.spec.dsl import gate_count, parse
 
 
@@ -137,7 +137,7 @@ class TestPlacement:
         for _ in range(200):
             rows = sorted(s.default_placement(rng).input_z)
             assert all(b - a >= 2 for a, b in zip(rows, rows[1:])), rows
-            assert 1 <= rows[0] and rows[-1] <= 14
+            assert rows[0] >= 1 and rows[-1] <= 14
 
     def test_sampling_actually_varies(self):
         rng = random.Random(0)

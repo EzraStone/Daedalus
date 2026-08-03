@@ -1,0 +1,39 @@
+# Masked discrete diffusion, 25M parameters. The main model.
+name: 25m-mdm
+
+model:
+  n_layers: 12
+  d_model: 384
+  n_heads: 6
+  d_ff: 1024
+  dropout: 0.0
+  # Alternate layers attending within a y-layer and across layers at fixed
+  # (x, z). Cheaper than full attention over 1536 tokens and matches the
+  # geometry. Off here so it stays a clean ablation rather than a confound.
+  layer_factored_attention: false
+
+train:
+  epochs: 8
+  batch_size: 24
+  lr: 3.0e-4
+  warmup: 500
+  weight_decay: 0.01
+  grad_clip: 1.0
+  # fp32 on purpose. RDNA lacks proper bf16 matrix support, and at this size
+  # fp32 costs little while removing a whole class of NaN debugging.
+  dtype: fp32
+
+sample:
+  steps: 24
+  temperature: 0.9
+  # Classifier-free guidance. §05 expects this to be one of the largest single
+  # wins; the ablation is guidance: 1.0.
+  guidance: 2.0
+  legality_masking: true
+  pin_ports: true
+
+loss:
+  # 85% of tokens are air. Unweighted, the model converges to empty grids and
+  # reports excellent loss while producing nothing that works.
+  inverse_frequency_weights: true
+  weight_clip: 10.0

@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daedalus"
+version = "0.1.0"
+description = "Text-conditioned generation of verified Minecraft redstone circuits"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Ezra Stone", email = "ezrastone993@gmail.com"}]
+keywords = ["minecraft", "redstone", "diffusion", "program-synthesis", "verifier"]
+
+# Deliberately minimal. The verifier, the compiler, the corpus builder and the
+# evaluation harness all run with only this, so a clone can execute its whole
+# test suite before anyone downloads a 2 GB wheel.
+dependencies = ["pyyaml>=6.0"]
+
+[project.optional-dependencies]
+train = ["torch>=2.3", "numpy>=1.26"]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+daedalus = "daedalus.cli:main"
+
+[project.urls]
+Repository = "https://github.com/EzraStone/Daedalus"
+
+[tool.setuptools.packages.find]
+include = ["daedalus*"]
+
+[tool.setuptools.package-data]
+"daedalus.synth" = ["*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # long lines in prose comments are fine
+    "SIM108", # ternaries are not always clearer
+    # zip() without strict=: the sequences here are index-parallel by
+    # construction and a length mismatch would already have failed elsewhere.
+    "B905",
+    # Frozen dataclasses as argument defaults are immutable and shared safely;
+    # the rule exists for mutable ones.
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"daedalus/synth/__init__.py" = ["A001"]

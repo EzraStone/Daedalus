@@ -61,8 +61,14 @@ def compile(  # noqa: A001 - the domain word is the right one here
     attempts: int = 8,
     library: Library | None = None,
     stats: Stats | None = None,
+    fixed_placement: PlacedSpec | None = None,
 ) -> Attempt:
     """Compile a spec into a verified layout.
+
+    ``fixed_placement`` pins the ports instead of re-rolling them each attempt.
+    Evaluation needs it: a method that answers a different question -- one with
+    the ports somewhere else -- has not answered the question, and the verdict
+    would be a port violation rather than a comparison.
 
     Placement is randomised, so a failure is often just bad luck with the
     ordering rather than an impossible spec; ``attempts`` re-rolls before
@@ -82,7 +88,7 @@ def compile(  # noqa: A001 - the domain word is the right one here
     last: Attempt | None = None
     for _ in range(attempts):
         stats.attempts += 1
-        placed = spec.default_placement(rng)
+        placed = fixed_placement if fixed_placement is not None else spec.default_placement(rng)
         try:
             grid = synthesise(netlist, placed, rng, library=library) if library else synthesise(
                 netlist, placed, rng

@@ -1,0 +1,4 @@
+# The gate the selftest builds.
+inputs A B
+outputs Q
+Q = ¬(A ∧ B)

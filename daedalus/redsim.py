@@ -198,6 +198,12 @@ class Verifier:
             raise VerifierError(f"could not start {self.binary}: {e}") from e
 
     def close(self) -> None:
+        """Shut the worker down and close both pipes.
+
+        Closing stdin alone leaks the stdout descriptor. One leak is harmless;
+        a training round that opens a verifier per worker thread runs out of
+        descriptors, and it does so a long way from the cause.
+        """
         if self._proc is None:
             return
         proc, self._proc = self._proc, None
@@ -207,6 +213,11 @@ class Verifier:
             proc.wait(timeout=10)
         except Exception:  # pragma: no cover - best effort teardown
             proc.kill()
+            proc.wait(timeout=5)
+        finally:
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None and not pipe.closed:
+                    pipe.close()
 
     def __enter__(self) -> Verifier:
         self.start()

@@ -1,0 +1,30 @@
+# Autoregressive baseline. Two days of work whose job is to prove the data
+# pipeline teaches something. Expect mediocre pass rates and no inpainting --
+# that is the comparison, not a disappointment.
+name: 25m-ar
+
+model:
+  n_layers: 12
+  d_model: 384
+  n_heads: 6
+  d_ff: 1024
+  dropout: 0.0
+
+train:
+  epochs: 8
+  batch_size: 24
+  lr: 3.0e-4
+  warmup: 500
+  weight_decay: 0.01
+  grad_clip: 1.0
+  dtype: fp32
+
+sample:
+  temperature: 0.9
+  top_k: 32
+  legality_masking: true
+  pin_ports: true
+
+loss:
+  inverse_frequency_weights: true
+  weight_clip: 10.0
