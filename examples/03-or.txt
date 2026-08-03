@@ -1,0 +1,4 @@
+# OR gate — either switch lights it
+inputs A B
+outputs Q
+Q = A | B

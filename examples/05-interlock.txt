@@ -1,0 +1,5 @@
+# Safety interlock — both switches on, override off
+inputs A B C
+outputs Q
+latency <= 6
+Q = A & B & !C

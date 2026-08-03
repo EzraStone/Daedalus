@@ -1,0 +1,411 @@
+"""A local window onto the compiler.
+
+The CLI answers "did it work?" after the fact. This answers "what is it doing?"
+while it happens — the spec as parsed, each placement attempt as it succeeds or
+fails, and the verified grid at the end.
+
+Two things it deliberately does **not** do:
+
+* **It does not accept plain English.** There is no natural-language parser and
+  no trained model, so a chat box would be a lie about what the system can do.
+  Input is the same DSL the CLI takes; the example picker is there to make that
+  approachable without overclaiming.
+* **It does not run any model.** Everything here is the procedural compiler and
+  the Rust verifier, both of which are finished and tested. Nothing on this page
+  should give the impression the generative half exists yet.
+
+Single user, local machine. There is no auth, no rate limiting and no
+multi-tenancy, and it binds to loopback by default for exactly that reason.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import random
+import tempfile
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from threading import Lock
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field
+
+from .. import __version__
+from .. import vocab as V
+from ..grid import Grid
+from ..redsim import Verifier, VerifierError
+from ..schematic import block_summary, write_litematic, write_schem
+from ..spec import PlacedSpec, Spec, SpecSyntaxError
+from ..synth import Attempt, Stats, compile_attempts
+from ..synth.netlist import NetlistError, compile_netlist
+
+STATIC = Path(__file__).parent / "static"
+EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
+
+#: Ceiling on the retry budget a request may ask for. The compiler is fast, but
+#: a browser tab should not be able to pin a core for a minute by typing a big
+#: number into a form field.
+MAX_ATTEMPTS = 60
+
+
+class SharedVerifier:
+    """One worker process, serialised behind a lock.
+
+    :class:`~daedalus.redsim.Verifier` is documented as not thread-safe — it is
+    a pipe with a request/response protocol, and two interleaved requests would
+    desynchronise it permanently. Since compiling is fast and this is a
+    single-user tool, a lock is the right answer; a pool would be complexity
+    bought for a problem nobody has.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._verifier: Verifier | None = None
+
+    def __enter__(self) -> Verifier:
+        self._lock.acquire()
+        try:
+            if self._verifier is None:
+                self._verifier = Verifier()
+                self._verifier.start()
+            return self._verifier
+        except Exception:
+            self._lock.release()
+            raise
+
+    def __exit__(self, *exc) -> None:
+        self._lock.release()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._verifier is not None:
+                self._verifier.close()
+                self._verifier = None
+
+
+shared = SharedVerifier()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Start with nothing and shut the worker down on the way out.
+
+    The verifier is created lazily on first use rather than at startup, so the
+    server comes up even when the Rust binary has not been built yet — and
+    ``/api/health`` can say so plainly instead of the process refusing to boot.
+    """
+    yield
+    shared.close()
+
+
+app = FastAPI(title="Daedalus", version=__version__, lifespan=lifespan)
+
+
+# --------------------------------------------------------------------------
+# request/response shapes
+# --------------------------------------------------------------------------
+
+
+class CompileRequest(BaseModel):
+    spec_source: str
+    seed: int = 0
+    attempts: int = Field(default=20, ge=1, le=MAX_ATTEMPTS)
+
+
+class ExportRequest(BaseModel):
+    tokens: list[int]
+    fmt: str = Field(default="schem", pattern="^(schem|litematic)$")
+    name: str = "daedalus"
+
+
+@dataclass(slots=True)
+class Parsed:
+    spec: Spec
+    placed: PlacedSpec
+
+
+def _parse(source: str, seed: int) -> Parsed:
+    spec = Spec.parse(source)
+    # Deterministic per seed so a rendered circuit can be reproduced from what
+    # the page shows: same source, same seed, same layout.
+    return Parsed(spec=spec, placed=spec.default_placement(random.Random(seed)))
+
+
+def _spec_payload(parsed: Parsed) -> dict:
+    spec = parsed.spec
+    try:
+        netlist = compile_netlist(spec)
+        netlist_summary = netlist.summary()
+    except NetlistError as e:
+        netlist_summary = f"cannot be expressed in the v1 primitive set: {e}"
+    return {
+        "source": spec.source(),
+        "ascii_source": spec.source(ascii_only=True),
+        "table": spec.table(),
+        "inputs": list(spec.inputs),
+        "outputs": list(spec.outputs),
+        "rows": list(spec.rows),
+        "gates": spec.gates,
+        "key": spec.key(),
+        "netlist": netlist_summary,
+        "input_z": list(parsed.placed.input_z),
+        "output_z": list(parsed.placed.output_z),
+        "constraints": spec.constraints.describe(),
+    }
+
+
+def _attempt_payload(n: int, attempt: Attempt) -> dict:
+    payload: dict = {"n": n, "stage": attempt.stage, "detail": attempt.detail, "ok": attempt.ok}
+    if attempt.grid is not None:
+        payload["tokens"] = attempt.grid.tokens()
+    if attempt.verdict is not None:
+        payload["verdict"] = str(attempt.verdict)
+        payload["verdict_kind"] = attempt.verdict.kind
+    if attempt.ok and attempt.grid is not None and attempt.verdict is not None:
+        payload["blocks"] = attempt.verdict.blocks
+        payload["latency_rt"] = attempt.verdict.latency_rt
+        payload["bbox"] = list(attempt.verdict.bbox)
+        payload["materials"] = block_summary(attempt.grid)
+    return payload
+
+
+def _scope_hint(stage: str) -> str | None:
+    """Turn a failure stage into something a person can act on."""
+    if stage in ("routing", "placement", "signal"):
+        return (
+            "The planar router cannot build netlists that need a wire crossing — "
+            "a signal and its complement feeding branches that reconverge (XOR, "
+            "multiplexers). This is a documented scope limit, not a transient "
+            "failure; more attempts will not help. See docs/divergences.md."
+        )
+    if stage == "netlist":
+        return "The spec is outside the v1 primitive set entirely."
+    if stage == "verify":
+        return (
+            "The placer produced a layout the verifier rejected. This is the "
+            "verifier doing its job — roughly a quarter of routed layouts are "
+            "discarded this way. Retrying usually finds a good one."
+        )
+    return None
+
+
+# --------------------------------------------------------------------------
+# routes
+# --------------------------------------------------------------------------
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> HTMLResponse:
+    return HTMLResponse((STATIC / "index.html").read_text())
+
+
+@app.get("/api/health")
+def health() -> dict:
+    """Reports whether the verifier binary is actually reachable.
+
+    Worth its own endpoint: "you forgot to run `cargo build --release`" is by
+    far the most likely reason a fresh clone fails, and it should say so rather
+    than surfacing as a mysterious error on first compile.
+    """
+    try:
+        from ..redsim import find_binary
+
+        return {"ok": True, "verifier": str(find_binary()), "version": __version__}
+    except VerifierError as e:
+        return {"ok": False, "error": str(e), "version": __version__}
+
+
+@app.get("/api/examples")
+def examples() -> list[dict]:
+    """Example specs for the picker.
+
+    These make the DSL learnable by showing it, which is the honest alternative
+    to a text box that pretends to understand English.
+    """
+    out = []
+    if EXAMPLES.is_dir():
+        for path in sorted(EXAMPLES.glob("*.txt")):
+            source = path.read_text()
+            title = path.stem.replace("-", " ").replace("_", " ")
+            for line in source.splitlines():
+                if line.startswith("#"):
+                    title = line.lstrip("# ").strip()
+                    break
+            out.append({"id": path.stem, "title": title, "source": source})
+    return out
+
+
+@app.post("/api/compile")
+def compile_once(request: CompileRequest) -> JSONResponse:
+    """Compile and return everything at once.
+
+    The WebSocket is the interesting path; this exists so the API is usable
+    from a script or `curl` without speaking WebSocket.
+    """
+    try:
+        parsed = _parse(request.spec_source, request.seed)
+    except SpecSyntaxError as e:
+        return JSONResponse({"ok": False, "error": str(e), "where": "parse"}, status_code=400)
+
+    stats = Stats()
+    attempts: list[dict] = []
+    with shared as verifier:
+        for n, attempt in enumerate(
+            compile_attempts(
+                parsed.spec,
+                verifier,
+                random.Random(request.seed),
+                attempts=request.attempts,
+                stats=stats,
+            ),
+            start=1,
+        ):
+            attempts.append(_attempt_payload(n, attempt))
+            if attempt.ok:
+                break
+
+    final = attempts[-1] if attempts else {}
+    return JSONResponse(
+        {
+            "ok": bool(final.get("ok")),
+            "spec": _spec_payload(parsed),
+            "attempts": attempts,
+            "stats": stats.as_dict(),
+            "hint": None if final.get("ok") else _scope_hint(final.get("stage", "")),
+        }
+    )
+
+
+@app.websocket("/api/compile/stream")
+async def compile_stream(socket: WebSocket) -> None:
+    """Push each step as it happens.
+
+    The compiler is synchronous and CPU-bound, so it runs on a worker thread
+    and hands results back through a queue. Running it inline would block the
+    event loop and the page would receive every message at once at the end —
+    which is exactly the experience this endpoint exists to avoid.
+    """
+    await socket.accept()
+    try:
+        while True:
+            raw = await socket.receive_text()
+            try:
+                request = CompileRequest(**json.loads(raw))
+            except Exception as e:  # noqa: BLE001 - any bad payload is the same to us
+                await socket.send_json({"event": "error", "where": "request", "message": str(e)})
+                continue
+            await _run_stream(socket, request)
+    except WebSocketDisconnect:
+        return
+
+
+async def _run_stream(socket: WebSocket, request: CompileRequest) -> None:
+    try:
+        parsed = _parse(request.spec_source, request.seed)
+    except SpecSyntaxError as e:
+        await socket.send_json(
+            {"event": "error", "where": "parse", "message": str(e), "line": e.line, "column": e.column}
+        )
+        return
+
+    await socket.send_json({"event": "parsed", "spec": _spec_payload(parsed)})
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    stats = Stats()
+
+    def work() -> None:
+        try:
+            with shared as verifier:
+                for n, attempt in enumerate(
+                    compile_attempts(
+                        parsed.spec,
+                        verifier,
+                        random.Random(request.seed),
+                        attempts=request.attempts,
+                        stats=stats,
+                    ),
+                    start=1,
+                ):
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait, {"event": "attempt", **_attempt_payload(n, attempt)}
+                    )
+                    if attempt.ok:
+                        break
+        except VerifierError as e:
+            loop.call_soon_threadsafe(
+                queue.put_nowait, {"event": "error", "where": "verifier", "message": str(e)}
+            )
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    task = loop.run_in_executor(None, work)
+    last: dict | None = None
+    while True:
+        message = await queue.get()
+        if message is None:
+            break
+        if message.get("event") == "attempt":
+            last = message
+        await socket.send_json(message)
+    await task
+
+    await socket.send_json(
+        {
+            "event": "done",
+            "ok": bool(last and last.get("ok")),
+            "stats": stats.as_dict(),
+            "hint": None if (last and last.get("ok")) else _scope_hint((last or {}).get("stage", "")),
+        }
+    )
+
+
+@app.post("/api/export")
+def export(request: ExportRequest) -> FileResponse:
+    """Write a schematic and hand it back as a download."""
+    if len(request.tokens) != V.CELLS:
+        return JSONResponse(
+            {"ok": False, "error": f"expected {V.CELLS} tokens, got {len(request.tokens)}"},
+            status_code=400,
+        )
+    grid = Grid.from_tokens(request.tokens)
+    suffix = ".litematic" if request.fmt == "litematic" else ".schem"
+    safe = "".join(c for c in request.name if c.isalnum() or c in "-_") or "daedalus"
+
+    # The file has to outlive this function: FileResponse streams it after we
+    # return, so it cannot be a context manager. mkstemp gives a path that
+    # survives, and the OS temp directory is the cleanup story.
+    fd, name = tempfile.mkstemp(suffix=suffix, prefix="daedalus-")
+    os.close(fd)
+    path = Path(name)
+    if request.fmt == "litematic":
+        write_litematic(grid, path, name=safe)
+    else:
+        write_schem(grid, path, name=safe)
+    return FileResponse(path, filename=f"{safe}{suffix}", media_type="application/octet-stream")
+
+
+@app.get("/api/palette")
+def palette() -> dict:
+    """Glyph and kind for every block token, so the page can render a grid.
+
+    Served rather than duplicated in JavaScript: the vocabulary is a wire
+    format shared with the Rust verifier, and a second hand-maintained copy in
+    the frontend is exactly the kind of thing that silently drifts.
+    """
+    out = {}
+    for token in V.BLOCK_TOKENS:
+        decoded = V.decode(token)
+        out[str(token)] = {
+            "kind": decoded.kind,
+            "glyph": V.glyph(token),
+            "state": V.state_string(token),
+        }
+    return {
+        "blocks": out,
+        "geometry": {"sx": V.SX, "sy": V.SY, "sz": V.SZ, "logic_y": V.LOGIC_Y},
+    }

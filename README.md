@@ -66,6 +66,7 @@ no README.
 | `daedalus.data` — the corpus engine | Working end to end. Builds, verifies, splits, writes a dataset card. |
 | `daedalus.schematic` — export | Complete. `.schem` and `.litematic`, dependency-free NBT. |
 | `daedalus.eval` — metrics and baselines | Complete. Three of four baselines runnable today. |
+| `daedalus.web` — the local window | Complete. Watch a spec get placed, routed and verified, step by step. |
 | `daedalus.train.loop` — the §06 loop | Complete and tested against a stub sampler. |
 
 ### Written but not yet run
@@ -93,8 +94,23 @@ python -m daedalus corpus data/ --scale 0.1
 python -m daedalus baselines --specs 25
 ```
 
+### The window
+
+```bash
+pip install -e ".[web]"
+python -m daedalus serve            # http://127.0.0.1:8765
+```
+
+A local page that shows the work rather than the result: the spec as parsed,
+each placement attempt as it succeeds or fails, the routed grid, the truth
+table, the verdict, and a schematic to download.
+
+It takes the **formal DSL**, not English — there is no natural-language parser
+and no trained model, and a chat box would be a lie about what the system can
+do. The example picker is there to make the DSL learnable instead.
+
 No Python dependencies beyond `pyyaml` for the gate library. `torch` is needed
-only to train.
+only to train; `fastapi`/`uvicorn`/`websockets` only for the window.
 
 Run the tests:
 
@@ -240,6 +256,7 @@ daedalus/
   train/loop.py           §06 verifier-guided rounds
   eval/                   metrics + baselines
   schematic/              .schem / .litematic, dependency-free NBT
+  web/                    the local window: FastAPI + one static page
 harness/                  fidelity harness: compare.py + Fabric mod source
 configs/                  25m-ar, 25m-mdm, loop-r5, corpus
 docs/                     design spec, divergences, hardware notes

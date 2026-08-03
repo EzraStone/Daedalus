@@ -1,0 +1,5 @@
+# Constrained NAND — the verifier enforces the footprint limit
+inputs A B
+outputs Q
+footprint <= 60
+Q = !(A & B)

@@ -1,0 +1,4 @@
+# NOR gate — on only when everything is off
+inputs A B
+outputs Q
+Q = !(A | B)

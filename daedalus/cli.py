@@ -114,6 +114,53 @@ def cmd_baselines(args) -> int:
     return 0
 
 
+def _module_present(name: str) -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec(name) is not None
+
+
+def cmd_serve(args) -> int:
+    """Open the local window onto the compiler."""
+    try:
+        import uvicorn
+    except ImportError:
+        print(
+            "the web window needs FastAPI and uvicorn:\n  pip install 'daedalus[web]'",
+            file=sys.stderr,
+        )
+        return 2
+
+    # uvicorn ships no WebSocket implementation of its own; without one it
+    # answers upgrade requests with a bare 404 and the page sits there saying
+    # "not connected" with nothing in the server log to explain it. Check up
+    # front, where the fix is one line away.
+    if not any(_module_present(name) for name in ("websockets", "wsproto")):
+        print(
+            "uvicorn has no WebSocket library, so the live view cannot connect.\n"
+            "  pip install websockets",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Fail here rather than on the first compile: "you forgot to build the
+    # verifier" is the most likely reason a fresh clone does not work, and it
+    # should not surface as a mysterious error three clicks later.
+    from .redsim import find_binary
+
+    find_binary()
+
+    print(f"Daedalus on http://{args.host}:{args.port}")
+    uvicorn.run(
+        "daedalus.web.app:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        log_level="warning",
+    )
+    return 0
+
+
 def cmd_selftest(args) -> int:
     del args
     try:
@@ -165,6 +212,13 @@ def main(argv=None) -> int:
     p.add_argument("--attempts", type=int, default=15)
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_baselines)
+
+    p = sub.add_parser("serve", help="open the local web window")
+    # Loopback by default: there is no auth here, and there should not be.
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--reload", action="store_true", help="reload on source changes")
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("selftest", help="prove the whole pipeline works")
     p.set_defaults(func=cmd_selftest)

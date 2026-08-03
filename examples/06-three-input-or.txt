@@ -1,0 +1,4 @@
+# Three-input OR — any of three switches
+inputs A B C
+outputs Q
+Q = A | B | C

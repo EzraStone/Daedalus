@@ -1,5 +1,5 @@
 # Everything depends on the verifier, so it builds first.
-.PHONY: all verifier test test-rust test-python lint selftest corpus baselines clean
+.PHONY: all verifier test test-rust test-python lint selftest web corpus baselines clean
 
 all: verifier
 
@@ -23,6 +23,10 @@ lint:
 selftest: verifier
 	./target/release/redsim selftest
 	python3 -m daedalus selftest
+
+# The local window: type a spec, watch it get placed, routed and verified.
+web: verifier
+	python3 -m daedalus serve
 
 corpus: verifier
 	python3 -m daedalus corpus data/ --scale 0.1

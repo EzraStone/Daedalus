@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daedalus — compile &amp; inspect</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%230F1318%27/%3E%3Crect x=%272%27 y=%277%27 width=%2712%27 height=%272%27 fill=%27%23F0392C%27/%3E%3C/svg%3E">
+<style>
+/* Palette lifted from the original design spec so the tool and the document
+   it came from look like the same project. */
+:root{
+  --void:#0F1318;
+  --panel:#171C23;
+  --panel-2:#1D242D;
+  --rule:#29323D;
+  --rule-soft:#202730;
+  --ink:#DDE4EB;
+  --ink-2:#A9B4C0;
+  --ink-dim:#77828F;
+  --live:#F0392C;
+  --cool:#5FB3C4;
+  --warn:#E0A82E;
+  --pass:#4FBF8B;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --body:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--void);color:var(--ink);
+  font-family:var(--body);font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--cool)}
+h1,h2,h3{margin:0;line-height:1.15}
+.eyebrow{
+  font-family:var(--mono);font-size:.66rem;font-weight:500;
+  letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);
+}
+
+header{
+  border-bottom:1px solid var(--rule);padding:1rem clamp(1rem,3vw,2rem);
+  display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap;
+}
+header h1{font-size:1.05rem;letter-spacing:.02em;text-transform:uppercase;font-weight:800}
+header h1 span{color:var(--live)}
+.tagline{color:var(--ink-dim);font-size:.85rem}
+#health{margin-left:auto;font-family:var(--mono);font-size:.7rem;color:var(--ink-dim)}
+#health.bad{color:var(--live)}
+
+/* A standing note, not a dismissible toast. The thing it says stays true. */
+.disclaimer{
+  border-bottom:1px solid var(--rule);background:rgba(224,168,46,.07);
+  padding:.55rem clamp(1rem,3vw,2rem);font-size:.82rem;color:var(--ink-2);
+}
+.disclaimer b{color:var(--warn);font-weight:600}
+
+main{
+  display:grid;gap:0;
+  grid-template-columns:minmax(0,22rem) minmax(0,1fr);
+  max-width:1500px;margin:0 auto;align-items:start;
+}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+
+.pane{padding:1.1rem clamp(1rem,3vw,1.6rem)}
+.left{border-right:1px solid var(--rule)}
+@media(max-width:900px){.left{border-right:0;border-bottom:1px solid var(--rule)}}
+
+label{display:block;margin:.9rem 0 .3rem}
+select,textarea,input{
+  width:100%;background:var(--panel);color:var(--ink);
+  border:1px solid var(--rule);border-radius:3px;padding:.5rem .6rem;
+  font-family:var(--mono);font-size:.82rem;
+}
+textarea{min-height:9rem;resize:vertical;line-height:1.5}
+textarea:focus,select:focus,input:focus{outline:2px solid var(--cool);outline-offset:1px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+
+button{
+  font-family:var(--body);font-size:.85rem;font-weight:600;cursor:pointer;
+  background:var(--live);color:#12161B;border:0;border-radius:3px;
+  padding:.6rem 1rem;width:100%;margin-top:1rem;
+}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.ghost{background:transparent;color:var(--cool);border:1px solid var(--rule);margin-top:.5rem}
+button.ghost:disabled{color:var(--ink-dim)}
+
+.hint{font-size:.78rem;color:var(--ink-dim);margin-top:.4rem}
+.hint code{font-family:var(--mono);color:var(--ink-2)}
+
+/* ---- log ---- */
+#log{
+  font-family:var(--mono);font-size:.75rem;line-height:1.5;
+  border:1px solid var(--rule);background:var(--panel);border-radius:3px;
+  padding:.6rem;max-height:15rem;overflow-y:auto;margin-top:.5rem;
+}
+#log:empty::after{content:"nothing run yet";color:var(--ink-dim)}
+.entry{display:grid;grid-template-columns:2.2rem 1fr;gap:.5rem;padding:.15rem 0}
+.entry .n{color:#4C5763}
+.entry.ok .msg{color:var(--pass)}
+.entry.fail .msg{color:var(--warn)}
+.entry.error .msg{color:var(--live)}
+.entry.info .msg{color:var(--ink-2)}
+.entry .detail{color:var(--ink-dim);display:block}
+
+/* ---- grid ---- */
+.grid-wrap{overflow-x:auto;padding-bottom:.4rem}
+#grid{display:grid;gap:2px;width:max-content}
+.cell{
+  width:22px;height:22px;border-radius:2px;background:#12161B;
+  display:grid;place-items:center;
+  font-family:var(--mono);font-size:10px;font-weight:600;
+}
+.cell.air{background:transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.03)}
+.cell.solid{background:#39424E;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.cell.wire{background:#5A1A17;color:#F0392C}
+.cell.torch{background:#40130F;color:var(--live);box-shadow:0 0 0 1px rgba(240,57,44,.45)}
+.cell.repeater{background:#2C333C;color:var(--cool)}
+.cell.comparator{background:#2C333C;color:var(--warn)}
+.cell.lever{background:#2C333C;color:var(--ink)}
+.cell.lamp{background:#F5C542;color:#221A05}
+.cell.target{background:#3A3040;color:var(--ink-2)}
+.cell.observer{background:#2A313A;color:var(--ink-dim)}
+
+/* ---- verdict ---- */
+#verdict{
+  font-family:var(--mono);font-size:.8rem;font-weight:600;letter-spacing:.04em;
+  border:1px solid var(--rule);border-radius:3px;padding:.55rem .7rem;
+  color:var(--ink-dim);margin:.9rem 0;
+}
+#verdict.pass{color:var(--pass);border-color:rgba(79,191,139,.5);background:rgba(79,191,139,.07)}
+#verdict.fail,#verdict.malformed{color:var(--live);border-color:rgba(240,57,44,.5);background:rgba(240,57,44,.07)}
+#verdict.unstable{color:var(--warn);border-color:rgba(224,168,46,.5);background:rgba(224,168,46,.07)}
+#verdict small{display:block;font-weight:400;color:var(--ink-dim);margin-top:.25rem;letter-spacing:0}
+
+.cards{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));margin-top:1rem}
+.card{border:1px solid var(--rule);background:var(--panel);border-radius:3px;padding:.75rem .85rem}
+.card h3{font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:.5rem}
+.card pre{
+  font-family:var(--mono);font-size:.76rem;line-height:1.5;margin:0;
+  color:var(--ink-2);white-space:pre;overflow-x:auto;
+}
+dl{margin:0;font-family:var(--mono);font-size:.76rem}
+dl div{display:flex;justify-content:space-between;gap:1rem;padding:.12rem 0}
+dt{color:var(--ink-dim)}
+dd{margin:0;color:var(--ink)}
+
+.legend{display:flex;flex-wrap:wrap;gap:.5rem 1rem;margin-top:.7rem;font-family:var(--mono);font-size:.68rem;color:var(--ink-dim)}
+.legend span{display:flex;align-items:center;gap:.3rem}
+.legend i{width:12px;height:12px;border-radius:2px;display:block}
+
+.empty{color:var(--ink-dim);font-size:.85rem;padding:2rem 0}
+.exports{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.9rem}
+.exports button{margin-top:0}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Daedalus<span>.</span></h1>
+  <span class="tagline">compile a spec into a verified redstone circuit</span>
+  <span id="health">checking verifier…</span>
+</header>
+
+<div class="disclaimer">
+  <b>Formal specs only.</b> There is no natural-language parser and no trained model yet —
+  this window drives the procedural compiler and the Rust verifier, both of which are finished.
+  Write the DSL below, or load an example to see its shape.
+</div>
+
+<main>
+  <section class="pane left">
+    <div class="eyebrow">Specification</div>
+
+    <label for="example">Load an example</label>
+    <select id="example"><option value="">—</option></select>
+
+    <label for="source">Spec source</label>
+    <textarea id="source" spellcheck="false">inputs A B
+outputs Q
+Q = !(A &amp; B)</textarea>
+    <div class="hint">
+      Operators: <code>! &amp; | ^</code> or <code>¬ ∧ ∨ ⊕</code>.
+      Constraints: <code>latency &lt;= n</code>, <code>footprint &lt;= n</code>, <code>region &lt;= w x d</code>.
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="seed">Seed</label>
+        <input id="seed" type="number" value="0" min="0">
+      </div>
+      <div>
+        <label for="attempts">Attempts</label>
+        <input id="attempts" type="number" value="20" min="1" max="60">
+      </div>
+    </div>
+
+    <button id="run">Compile</button>
+
+    <div class="eyebrow" style="margin-top:1.4rem">Progress</div>
+    <div id="log"></div>
+  </section>
+
+  <section class="pane">
+    <div id="verdict">idle<small>load an example or write a spec, then press Compile</small></div>
+
+    <div id="results" hidden>
+      <div class="eyebrow">Layout · logic layer (y=1)</div>
+      <div class="grid-wrap"><div id="grid"></div></div>
+      <div id="no-grid" class="empty" hidden>No layout — nothing was routed for this spec.</div>
+      <div class="legend" id="legend"></div>
+
+      <div class="exports">
+        <button class="ghost" id="export-schem" disabled>Download .schem</button>
+        <button class="ghost" id="export-litematic" disabled>Download .litematic</button>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <h3>Truth table</h3>
+          <pre id="table"></pre>
+        </div>
+        <div class="card">
+          <h3>Canonical spec</h3>
+          <pre id="canonical"></pre>
+        </div>
+        <div class="card">
+          <h3>Measurements</h3>
+          <dl id="measurements"></dl>
+        </div>
+        <div class="card">
+          <h3>Materials</h3>
+          <dl id="materials"></dl>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty" id="empty">Nothing compiled yet.</div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  example: $("example"), source: $("source"), seed: $("seed"), attempts: $("attempts"),
+  run: $("run"), log: $("log"), verdict: $("verdict"), results: $("results"),
+  empty: $("empty"), grid: $("grid"), legend: $("legend"), table: $("table"),
+  canonical: $("canonical"), measurements: $("measurements"), materials: $("materials"),
+  schem: $("export-schem"), litematic: $("export-litematic"), health: $("health"),
+  noGrid: $("no-grid"),
+};
+
+let palette = null;      // token id -> {kind, glyph, state}
+let geometry = null;
+let lastTokens = null;   // the grid of the most recent PASS
+let socket = null;
+
+// The single-character labels the grid renders. Kept short on purpose: at
+// 22px a cell has room for one glyph, and colour carries most of the meaning.
+const GLYPH = {
+  air: "", solid: "", wire: "·", torch: "◆", repeater: "▶",
+  comparator: "◆", lever: "⌐", lamp: "◍", target: "◎", observer: "◇",
+};
+
+const LEGEND = [
+  ["solid", "block"], ["wire", "dust"], ["torch", "torch"],
+  ["repeater", "repeater"], ["lever", "lever"], ["lamp", "lamp"],
+];
+
+// ---------------------------------------------------------------- helpers
+
+function log(kind, label, detail, n) {
+  const entry = document.createElement("div");
+  entry.className = "entry " + kind;
+  const num = document.createElement("span");
+  num.className = "n";
+  num.textContent = n == null ? "" : String(n);
+  const msg = document.createElement("span");
+  msg.className = "msg";
+  msg.textContent = label;
+  if (detail) {
+    const d = document.createElement("span");
+    d.className = "detail";
+    d.textContent = detail;
+    msg.appendChild(d);
+  }
+  entry.append(num, msg);
+  els.log.appendChild(entry);
+  els.log.scrollTop = els.log.scrollHeight;
+}
+
+function setVerdict(cls, text, sub) {
+  els.verdict.className = cls || "";
+  els.verdict.textContent = text;
+  if (sub) {
+    const small = document.createElement("small");
+    small.textContent = sub;
+    els.verdict.appendChild(small);
+  }
+}
+
+function renderDl(target, pairs) {
+  target.replaceChildren();
+  for (const [key, value] of pairs) {
+    const row = document.createElement("div");
+    const dt = document.createElement("dt");
+    dt.textContent = key;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    row.append(dt, dd);
+    target.appendChild(row);
+  }
+}
+
+/** Draw the logic layer. The grid is y-z-x, so one layer is a contiguous slice. */
+function renderGrid(tokens) {
+  if (!palette || !geometry) return;
+  const { sx, sz, logic_y: y } = geometry;
+  els.grid.style.gridTemplateColumns = `repeat(${sx}, 22px)`;
+  els.grid.replaceChildren();
+  for (let z = 0; z < sz; z++) {
+    for (let x = 0; x < sx; x++) {
+      const token = tokens[(y * sz + z) * sx + x];
+      const info = palette[String(token)] || { kind: "air" };
+      const cell = document.createElement("div");
+      cell.className = "cell " + info.kind;
+      cell.textContent = GLYPH[info.kind] || "";
+      cell.title = `(${x}, ${y}, ${z})  ${info.state || "air"}`;
+      els.grid.appendChild(cell);
+    }
+  }
+}
+
+function renderLegend() {
+  els.legend.replaceChildren();
+  for (const [kind, label] of LEGEND) {
+    const span = document.createElement("span");
+    const swatch = document.createElement("i");
+    swatch.className = "cell " + kind;
+    swatch.style.width = swatch.style.height = "12px";
+    span.append(swatch, document.createTextNode(label));
+    els.legend.appendChild(span);
+  }
+}
+
+function showSpec(spec) {
+  els.table.textContent = spec.table;
+  els.canonical.textContent = spec.source;
+  renderDl(els.measurements, [
+    ["gates", spec.gates],
+    ["netlist", spec.netlist],
+    ["inputs", spec.inputs.join(" ") + "  rows " + spec.input_z.join(", ")],
+    ["outputs", spec.outputs.join(" ") + "  rows " + spec.output_z.join(", ")],
+    ["spec hash", spec.key],
+    ...(spec.constraints.length ? [["constraints", spec.constraints.join("; ")]] : []),
+  ]);
+}
+
+/** Wipe anything belonging to a previous run.
+ *
+ * Without this, a spec that fails to route leaves the last successful
+ * circuit on screen — grid, materials and all — which reads as if the
+ * failing spec produced it. Showing a stale circuit next to a failure
+ * notice is worse than showing nothing.
+ */
+function clearResult() {
+  lastTokens = null;
+  els.grid.replaceChildren();
+  els.materials.replaceChildren();
+  els.noGrid.hidden = true;
+  els.schem.disabled = els.litematic.disabled = true;
+}
+
+function showResult(attempt) {
+  lastTokens = attempt.tokens || null;
+  if (lastTokens) renderGrid(lastTokens);
+  els.noGrid.hidden = Boolean(lastTokens);
+  els.results.hidden = false;
+  els.empty.hidden = true;
+  els.schem.disabled = els.litematic.disabled = !attempt.ok;
+
+  const extra = [];
+  if (attempt.blocks != null) extra.push(["blocks", attempt.blocks]);
+  if (attempt.latency_rt != null) extra.push(["latency", attempt.latency_rt + " rt"]);
+  if (attempt.bbox) extra.push(["bbox", attempt.bbox.join(" x ")]);
+  if (extra.length) {
+    for (const [k, v] of extra) {
+      const row = document.createElement("div");
+      const dt = document.createElement("dt");
+      dt.textContent = k;
+      const dd = document.createElement("dd");
+      dd.textContent = v;
+      row.append(dt, dd);
+      els.measurements.appendChild(row);
+    }
+  }
+  renderDl(els.materials, Object.entries(attempt.materials || {}));
+}
+
+// ---------------------------------------------------------------- socket
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  socket = new WebSocket(`${proto}//${location.host}/api/compile/stream`);
+  socket.addEventListener("message", (event) => handle(JSON.parse(event.data)));
+  socket.addEventListener("close", () => {
+    els.run.disabled = false;
+    // Reconnect lazily: a dropped socket should not require a page reload.
+    setTimeout(connect, 1500);
+  });
+  socket.addEventListener("open", () => { els.run.disabled = false; });
+}
+
+function handle(message) {
+  switch (message.event) {
+    case "parsed":
+      log("info", "parsed", `${message.spec.gates} gate(s) · ${message.spec.netlist}`);
+      showSpec(message.spec);
+      els.results.hidden = false;
+      els.empty.hidden = true;
+      break;
+
+    case "attempt":
+      if (message.ok) {
+        log("ok", "verified", message.verdict, message.n);
+        setVerdict("pass", message.verdict, `attempt ${message.n}`);
+        showResult(message);
+      } else {
+        log("fail", message.stage, message.detail, message.n);
+        if (message.tokens) showResult(message);
+      }
+      break;
+
+    case "done":
+      els.run.disabled = false;
+      if (!message.ok) {
+        if (!lastTokens) els.noGrid.hidden = false;
+        const s = message.stats || {};
+        setVerdict(
+          "fail",
+          "no verified layout",
+          message.hint || `${s.attempts || 0} attempt(s), none verified`
+        );
+        if (message.hint) log("info", "why", message.hint);
+      }
+      break;
+
+    case "error":
+      els.run.disabled = false;
+      log("error", message.where, message.message);
+      setVerdict("malformed", message.where + " error", message.message);
+      break;
+  }
+}
+
+// ---------------------------------------------------------------- actions
+
+function run() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    log("error", "socket", "not connected — retrying, try again in a moment");
+    return;
+  }
+  els.log.replaceChildren();
+  els.run.disabled = true;
+  clearResult();
+  setVerdict("", "compiling…", "");
+  socket.send(JSON.stringify({
+    spec_source: els.source.value,
+    seed: Number(els.seed.value) || 0,
+    attempts: Number(els.attempts.value) || 20,
+  }));
+}
+
+async function download(fmt) {
+  if (!lastTokens) return;
+  const response = await fetch("/api/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tokens: lastTokens, fmt, name: "daedalus" }),
+  });
+  if (!response.ok) {
+    log("error", "export", await response.text());
+    return;
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `daedalus.${fmt}`;
+  link.click();
+  URL.revokeObjectURL(url);
+  log("info", "exported", `daedalus.${fmt}`);
+}
+
+// ---------------------------------------------------------------- boot
+
+els.run.addEventListener("click", run);
+els.schem.addEventListener("click", () => download("schem"));
+els.litematic.addEventListener("click", () => download("litematic"));
+els.source.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") run();
+});
+els.example.addEventListener("change", () => {
+  const chosen = els.example.selectedOptions[0];
+  if (chosen && chosen.dataset.source) els.source.value = chosen.dataset.source;
+});
+
+(async function boot() {
+  renderLegend();
+
+  const health = await fetch("/api/health").then((r) => r.json());
+  if (health.ok) {
+    els.health.textContent = "verifier ready";
+  } else {
+    els.health.textContent = "verifier missing";
+    els.health.className = "bad";
+    setVerdict("malformed", "verifier not found", health.error);
+    els.run.disabled = true;
+    return;
+  }
+
+  const pal = await fetch("/api/palette").then((r) => r.json());
+  palette = pal.blocks;
+  geometry = pal.geometry;
+
+  const list = await fetch("/api/examples").then((r) => r.json());
+  for (const example of list) {
+    const option = document.createElement("option");
+    option.value = example.id;
+    option.textContent = example.title;
+    option.dataset.source = example.source;
+    els.example.appendChild(option);
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>

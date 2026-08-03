@@ -1,0 +1,4 @@
+# NAND gate — the light is on unless both switches are on
+inputs A B
+outputs Q
+Q = !(A & B)

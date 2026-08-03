@@ -14,6 +14,7 @@ grids is exactly the failure mode a synthetic corpus is prone to.
 from __future__ import annotations
 
 import random
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from ..grid import Grid
@@ -32,6 +33,7 @@ __all__ = [
     "Stats",
     "Synthesiser",
     "compile",
+    "compile_attempts",
     "compile_netlist",
     "compile_many",
     "load",
@@ -52,6 +54,69 @@ class Attempt:
     @property
     def ok(self) -> bool:
         return self.stage == "ok"
+
+
+def compile_attempts(
+    spec: Spec,
+    verifier: Verifier,
+    rng: random.Random | None = None,
+    attempts: int = 8,
+    library: Library | None = None,
+    stats: Stats | None = None,
+    fixed_placement: PlacedSpec | None = None,
+) -> Iterator[Attempt]:
+    """Yield every attempt at compiling ``spec``, as each one finishes.
+
+    Same work as :func:`compile`, exposed one step at a time. The last item is
+    always the one :func:`compile` would have returned; everything before it is
+    a failed try, with the stage and detail that explain why.
+
+    This exists because "it failed" is a much less useful thing to be told than
+    "it placed four times, ran out of room routing net 2 each time, and here is
+    where". The CLI collapses the stream to its final element; the web UI shows
+    the whole thing as it happens.
+    """
+    rng = rng or random.Random()
+    stats = stats if stats is not None else Stats()
+
+    try:
+        netlist = compile_netlist(spec)
+    except NetlistError as e:
+        stats.attempts += 1
+        stats.note("netlist")
+        yield Attempt(None, None, None, "netlist", str(e))
+        return
+
+    produced = False
+    for _ in range(attempts):
+        stats.attempts += 1
+        placed = fixed_placement if fixed_placement is not None else spec.default_placement(rng)
+        try:
+            grid = (
+                synthesise(netlist, placed, rng, library=library)
+                if library
+                else synthesise(netlist, placed, rng)
+            )
+        except RoutingFailure as e:
+            stats.note(e.stage)
+            produced = True
+            yield Attempt(None, None, placed, e.stage, e.detail)
+            continue
+        stats.placed += 1
+
+        verdict = verifier.evaluate(grid, placed)
+        if isinstance(verdict, Pass):
+            stats.routed += 1
+            yield Attempt(grid, verdict, placed, "ok")
+            return
+        stats.note("verify")
+        produced = True
+        yield Attempt(grid, verdict, placed, "verify", str(verdict))
+
+    if not produced:
+        # `attempts <= 0`. Reported rather than returning an empty stream, so a
+        # caller that misconfigures the retry budget sees why nothing happened.
+        yield Attempt(None, None, None, "placement", "no attempt got as far as routing")
 
 
 def compile(  # noqa: A001 - the domain word is the right one here
@@ -75,37 +140,13 @@ def compile(  # noqa: A001 - the domain word is the right one here
     giving up. The returned :class:`Attempt` records which stage failed, which
     is what makes the discard rate a diagnosis instead of a mystery.
     """
-    rng = rng or random.Random()
-    stats = stats if stats is not None else Stats()
-
-    try:
-        netlist = compile_netlist(spec)
-    except NetlistError as e:
-        stats.attempts += 1
-        stats.note("netlist")
-        return Attempt(None, None, None, "netlist", str(e))
-
     last: Attempt | None = None
-    for _ in range(attempts):
-        stats.attempts += 1
-        placed = fixed_placement if fixed_placement is not None else spec.default_placement(rng)
-        try:
-            grid = synthesise(netlist, placed, rng, library=library) if library else synthesise(
-                netlist, placed, rng
-            )
-        except RoutingFailure as e:
-            stats.note(e.stage)
-            last = Attempt(None, None, placed, e.stage, e.detail)
-            continue
-        stats.placed += 1
-
-        verdict = verifier.evaluate(grid, placed)
-        if isinstance(verdict, Pass):
-            stats.routed += 1
-            return Attempt(grid, verdict, placed, "ok")
-        stats.note("verify")
-        last = Attempt(grid, verdict, placed, "verify", str(verdict))
-
+    for attempt in compile_attempts(
+        spec, verifier, rng, attempts, library, stats, fixed_placement
+    ):
+        last = attempt
+        if attempt.ok:
+            break
     return last or Attempt(None, None, None, "placement", "no attempt got as far as routing")
 
 

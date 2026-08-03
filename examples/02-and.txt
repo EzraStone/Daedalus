@@ -1,0 +1,4 @@
+# AND gate — both switches must be on
+inputs A B
+outputs Q
+Q = A & B
