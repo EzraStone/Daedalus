@@ -1,5 +1,5 @@
 # Everything depends on the verifier, so it builds first.
-.PHONY: all verifier test test-rust test-python lint selftest web corpus baselines clean
+.PHONY: all verifier test test-rust test-python lint selftest web tui corpus baselines clean
 
 all: verifier
 
@@ -27,6 +27,10 @@ selftest: verifier
 # The local window: type a spec, watch it get placed, routed and verified.
 web: verifier
 	python3 -m daedalus serve
+
+# The same window, without a browser.
+tui: verifier
+	python3 -m daedalus tui
 
 corpus: verifier
 	python3 -m daedalus corpus data/ --scale 0.1

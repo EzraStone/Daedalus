@@ -161,6 +161,24 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def cmd_tui(args) -> int:
+    """The same window, in the terminal."""
+    del args
+    try:
+        from .tui import main as tui_main
+    except ImportError:
+        print(
+            "the terminal window needs Textual:\n  pip install 'daedalus[tui]'",
+            file=sys.stderr,
+        )
+        return 2
+
+    from .redsim import find_binary
+
+    find_binary()
+    return tui_main()
+
+
 def cmd_selftest(args) -> int:
     del args
     try:
@@ -219,6 +237,9 @@ def main(argv=None) -> int:
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--reload", action="store_true", help="reload on source changes")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("tui", help="open the terminal window")
+    p.set_defaults(func=cmd_tui)
 
     p = sub.add_parser("selftest", help="prove the whole pipeline works")
     p.set_defaults(func=cmd_selftest)

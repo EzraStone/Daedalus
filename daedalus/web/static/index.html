@@ -256,17 +256,9 @@ let geometry = null;
 let lastTokens = null;   // the grid of the most recent PASS
 let socket = null;
 
-// The single-character labels the grid renders. Kept short on purpose: at
-// 22px a cell has room for one glyph, and colour carries most of the meaning.
-const GLYPH = {
-  air: "", solid: "", wire: "·", torch: "◆", repeater: "▶",
-  comparator: "◆", lever: "⌐", lamp: "◍", target: "◎", observer: "◇",
-};
-
-const LEGEND = [
-  ["solid", "block"], ["wire", "dust"], ["torch", "torch"],
-  ["repeater", "repeater"], ["lever", "lever"], ["lamp", "lamp"],
-];
+// Glyphs and the legend come from the server (daedalus/render.py), so the
+// page and the terminal UI cannot disagree about what a torch looks like.
+let legend = [];
 
 // ---------------------------------------------------------------- helpers
 
@@ -325,7 +317,7 @@ function renderGrid(tokens) {
       const info = palette[String(token)] || { kind: "air" };
       const cell = document.createElement("div");
       cell.className = "cell " + info.kind;
-      cell.textContent = GLYPH[info.kind] || "";
+      cell.textContent = (info.glyph || "").trim();
       cell.title = `(${x}, ${y}, ${z})  ${info.state || "air"}`;
       els.grid.appendChild(cell);
     }
@@ -334,12 +326,12 @@ function renderGrid(tokens) {
 
 function renderLegend() {
   els.legend.replaceChildren();
-  for (const [kind, label] of LEGEND) {
+  for (const kind of legend) {
     const span = document.createElement("span");
     const swatch = document.createElement("i");
     swatch.className = "cell " + kind;
     swatch.style.width = swatch.style.height = "12px";
-    span.append(swatch, document.createTextNode(label));
+    span.append(swatch, document.createTextNode(kind));
     els.legend.appendChild(span);
   }
 }
@@ -507,8 +499,6 @@ els.example.addEventListener("change", () => {
 });
 
 (async function boot() {
-  renderLegend();
-
   const health = await fetch("/api/health").then((r) => r.json());
   if (health.ok) {
     els.health.textContent = "verifier ready";
@@ -523,6 +513,8 @@ els.example.addEventListener("change", () => {
   const pal = await fetch("/api/palette").then((r) => r.json());
   palette = pal.blocks;
   geometry = pal.geometry;
+  legend = pal.legend || [];
+  renderLegend();
 
   const list = await fetch("/api/examples").then((r) => r.json());
   for (const example of list) {

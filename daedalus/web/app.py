@@ -38,6 +38,8 @@ from .. import __version__
 from .. import vocab as V
 from ..grid import Grid
 from ..redsim import Verifier, VerifierError
+from ..render import LEGEND
+from ..render import palette as display_palette
 from ..schematic import block_summary, write_litematic, write_schem
 from ..spec import PlacedSpec, Spec, SpecSyntaxError
 from ..synth import Attempt, Stats, compile_attempts
@@ -391,21 +393,15 @@ def export(request: ExportRequest) -> FileResponse:
 
 @app.get("/api/palette")
 def palette() -> dict:
-    """Glyph and kind for every block token, so the page can render a grid.
+    """Glyph, colour and kind for every block token.
 
-    Served rather than duplicated in JavaScript: the vocabulary is a wire
-    format shared with the Rust verifier, and a second hand-maintained copy in
-    the frontend is exactly the kind of thing that silently drifts.
+    Served from :mod:`daedalus.render` rather than duplicated in JavaScript.
+    The terminal UI reads the same module, so the two views cannot drift into
+    disagreeing about what a torch looks like — which is the sort of thing that
+    goes wrong quietly, because nothing fails when it does.
     """
-    out = {}
-    for token in V.BLOCK_TOKENS:
-        decoded = V.decode(token)
-        out[str(token)] = {
-            "kind": decoded.kind,
-            "glyph": V.glyph(token),
-            "state": V.state_string(token),
-        }
     return {
-        "blocks": out,
+        "blocks": display_palette(),
+        "legend": list(LEGEND),
         "geometry": {"sx": V.SX, "sy": V.SY, "sz": V.SZ, "logic_y": V.LOGIC_Y},
     }

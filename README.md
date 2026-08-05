@@ -99,18 +99,26 @@ python -m daedalus baselines --specs 25
 ```bash
 pip install -e ".[web]"
 python -m daedalus serve            # http://127.0.0.1:8765
+
+pip install -e ".[tui]"
+python -m daedalus tui              # the same thing, in the terminal
 ```
 
-A local page that shows the work rather than the result: the spec as parsed,
-each placement attempt as it succeeds or fails, the routed grid, the truth
-table, the verdict, and a schematic to download.
+Either one shows the work rather than the result: the spec as parsed, each
+placement attempt as it succeeds or fails, the routed grid, the truth table,
+the verdict, and a schematic to write out. Pick the browser or the terminal;
+they run the same compiler and read the same glyphs and colours out of
+`daedalus/render.py`, so they cannot drift into disagreeing about what a torch
+looks like.
 
-It takes the **formal DSL**, not English — there is no natural-language parser
+Both take the **formal DSL**, not English — there is no natural-language parser
 and no trained model, and a chat box would be a lie about what the system can
-do. The example picker is there to make the DSL learnable instead.
+do. The example picker is there to make the DSL learnable instead; both views
+load the same files from `examples/`.
 
 No Python dependencies beyond `pyyaml` for the gate library. `torch` is needed
-only to train; `fastapi`/`uvicorn`/`websockets` only for the window.
+only to train; `fastapi`/`uvicorn`/`websockets` only for the page, `textual`
+only for the terminal.
 
 Run the tests:
 
@@ -256,7 +264,9 @@ daedalus/
   train/loop.py           §06 verifier-guided rounds
   eval/                   metrics + baselines
   schematic/              .schem / .litematic, dependency-free NBT
+  render.py               glyphs and colours, shared by both windows
   web/                    the local window: FastAPI + one static page
+  tui.py                  the same window in the terminal, on Textual
 harness/                  fidelity harness: compare.py + Fabric mod source
 configs/                  25m-ar, 25m-mdm, loop-r5, corpus
 docs/                     design spec, divergences, hardware notes

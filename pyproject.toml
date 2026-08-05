@@ -27,6 +27,10 @@ dependencies = ["pyyaml>=6.0"]
 # it speaks ASGI in-process -- so the test suite passes while the real page
 # cannot connect. Pinning it here is what stops that combination happening.
 web = ["fastapi>=0.110", "uvicorn>=0.29", "websockets>=12"]
+# The same window in a terminal. Shares daedalus.render and
+# daedalus.synth.compile_attempts with the web view, so the two cannot
+# drift into disagreeing about what a circuit looks like.
+tui = ["textual>=0.60"]
 train = ["torch>=2.3", "numpy>=1.26"]
 dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
 
