@@ -60,6 +60,19 @@ class BridgePlan:
     def footprint(self) -> frozenset[Cell]:
         return frozenset(self.cell(offset) for offset in range(-3, 4))
 
+    @property
+    def wire_hops(self) -> int:
+        """Signal-strength cost from one ground endpoint to the other."""
+        return len(self.dust) - 1
+
+    def other_end(self, endpoint: Cell) -> Cell:
+        """Return the endpoint across the elevated span."""
+        if endpoint == self.entry:
+            return self.exit
+        if endpoint == self.exit:
+            return self.entry
+        raise ValueError(f"{endpoint} is not a bridge endpoint")
+
     def obstructions(self, grid: Grid) -> tuple[Voxel, ...]:
         """Occupied voxels that prevent this bridge from being stamped.
 

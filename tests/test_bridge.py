@@ -45,6 +45,16 @@ def test_bridge_reports_build_volume_edges():
     assert not BridgePlan((2, 8), "x").in_bounds
 
 
+def test_bridge_exposes_its_virtual_edge_and_signal_cost():
+    bridge = BridgePlan((8, 8), "x")
+
+    assert bridge.wire_hops == 6
+    assert bridge.other_end(bridge.entry) == bridge.exit
+    assert bridge.other_end(bridge.exit) == bridge.entry
+    with pytest.raises(ValueError, match="not a bridge endpoint"):
+        bridge.other_end(bridge.crossing)
+
+
 def test_bridge_stamps_supported_dust_without_touching_the_underpass():
     grid = Grid.with_substrate()
     bridge = BridgePlan((8, 8), "x")
