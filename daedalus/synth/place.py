@@ -617,9 +617,7 @@ class Synthesiser:
             comps.sort(key=len, reverse=True)
             head = comps[0]
             for other in comps[1:]:
-                path = self._search(head, other, n)
-                if path is not None:
-                    self._commit_path(path, n, tree)
+                if self._connect(head, other, n, tree):
                     break
             else:
                 raise RoutingFailure("routing", f"net {n}: cannot join {len(comps)} fragments")
