@@ -797,8 +797,8 @@ class Synthesiser:
             for entry, exit in ((plan.entry, plan.exit), (plan.exit, plan.entry)):
                 footprint = plan.footprint
 
-                def bridge_forbid(cell, allowed, outer=forbid):
-                    return (cell in footprint and cell != allowed) or (
+                def bridge_forbid(cell, allowed, blocked=footprint, outer=forbid):
+                    return (cell in blocked and cell != allowed) or (
                         outer is not None and outer(cell)
                     )
 
