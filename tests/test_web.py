@@ -15,6 +15,7 @@ from __future__ import annotations
 import gzip
 import json
 import random
+from pathlib import Path
 
 import pytest
 
@@ -116,7 +117,7 @@ class TestRoutes:
     def test_health_finds_the_verifier(self, client):
         body = client.get("/api/health").json()
         assert body["ok"], body
-        assert body["verifier"].endswith("redsim")
+        assert Path(body["verifier"]).stem == "redsim"
 
     def test_examples_carry_usable_source(self, client):
         examples = client.get("/api/examples").json()
@@ -151,7 +152,7 @@ class TestRoutes:
         assert response.status_code == 400
         assert response.json()["where"] == "parse"
 
-    def test_known_gap_reports_a_hint_rather_than_a_bare_failure(self, client):
+    def test_routing_failure_reports_a_retry_hint(self, client):
         body = client.post(
             "/api/compile", json={"spec_source": XOR, "seed": 0, "attempts": 4}
         ).json()

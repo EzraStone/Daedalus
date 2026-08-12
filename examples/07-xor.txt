@@ -1,0 +1,4 @@
+# XOR — compiled through a planar-friendly NOR decomposition
+inputs A B
+outputs Q
+Q = A ^ B
