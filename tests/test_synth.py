@@ -169,18 +169,22 @@ class TestCompilation:
         compile(make("Q = A & B", "A B"), verifier, random.Random(0), attempts=4, stats=stats)
         d = stats.as_dict()
         assert d["attempts"] >= 1
-        assert set(d) == {"attempts", "placed", "routed", "failures"}
+        assert set(d) == {"attempts", "placed", "routed", "bridged", "failures"}
 
     def test_crossbar_netlists_use_the_bridging_router(self, verifier):
         """A signal and its complement feeding branches that reconverge needs a
         wire crossing, so at least one placement must use the elevated layer.
         """
         spec = make("Q = (A & B) | (!A & C)", "A B C")
-        outcomes = [compile(spec, verifier, random.Random(s), attempts=20) for s in range(4)]
+        stats = Stats()
+        outcomes = [
+            compile(spec, verifier, random.Random(s), attempts=20, stats=stats) for s in range(4)
+        ]
         built = [attempt for attempt in outcomes if attempt.ok]
 
         assert built, "the bridging router should cover at least one crossbar placement"
         assert any(3 in attempt.grid.occupied_layers() for attempt in built)
+        assert stats.bridged >= 1
 
 
 class TestNetlistErrors:

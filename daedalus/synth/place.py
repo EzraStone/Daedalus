@@ -206,6 +206,7 @@ class Stats:
     attempts: int = 0
     placed: int = 0
     routed: int = 0
+    bridged: int = 0
     failures: dict[str, int] = field(default_factory=dict)
 
     def note(self, stage: str) -> None:
@@ -216,6 +217,7 @@ class Stats:
             "attempts": self.attempts,
             "placed": self.placed,
             "routed": self.routed,
+            "bridged": self.bridged,
             "failures": dict(sorted(self.failures.items())),
         }
 
