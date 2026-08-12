@@ -199,3 +199,15 @@ def test_router_connectivity_treats_a_bridge_as_one_net():
 
     assert len(planar) == 2
     assert connected == [{plan.entry, plan.exit}]
+
+
+def test_signal_propagation_charges_for_every_elevated_wire_hop():
+    layout = crossing_layout()
+    plan = BridgePlan((8, 8), "x")
+    layout.place_bridge(plan, net=0)
+    synth = Synthesiser.__new__(Synthesiser)
+    synth.layout = layout
+    synth.trees = {0: {plan.entry, plan.exit}}
+
+    assert synth._propagate(0, {plan.entry}, limit=15)[plan.exit] == plan.wire_hops
+    assert plan.exit not in synth._propagate(0, {plan.entry}, limit=plan.wire_hops - 1)

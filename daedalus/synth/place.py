@@ -797,6 +797,10 @@ class Synthesiser:
         """
         dust = self.trees.get(net, set())
         reps = {c: f for c, f in self.layout.repeaters.get(net, ())}
+        bridge_edges: dict[Cell, tuple[Cell, int]] = {}
+        for bridge in self.layout.bridges.get(net, ()):
+            bridge_edges[bridge.entry] = (bridge.exit, bridge.wire_hops)
+            bridge_edges[bridge.exit] = (bridge.entry, bridge.wire_hops)
         dist: dict[Cell, int] = {}
         queue: deque[Cell] = deque()
         for s in starts:
@@ -808,6 +812,12 @@ class Synthesiser:
             k = dist[cur]
             if k > limit:
                 continue
+            if cur in bridge_edges:
+                other, hops = bridge_edges[cur]
+                bridge_cost = k + hops
+                if bridge_cost <= limit and dist.get(other, 1 << 30) > bridge_cost:
+                    dist[other] = bridge_cost
+                    queue.append(other)
             for nb in neighbours(cur):
                 if nb in dust:
                     if k + 1 <= limit and dist.get(nb, 1 << 30) > k + 1:
