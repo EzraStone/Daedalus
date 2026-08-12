@@ -137,6 +137,34 @@ class Layout:
             if n != keep and self.is_free(n):
                 self.frozen.add(n)
 
+    def can_place_bridge(self, plan: BridgePlan, net: int) -> bool:
+        """Whether ``net`` can safely cross the wire beneath ``plan``."""
+        if not plan.in_bounds or plan.obstructions(self.grid):
+            return False
+
+        under = self.net_at(plan.crossing)
+        if under is None or under == net:
+            return False
+
+        # The lower net must pass straight across the bridge, perpendicular
+        # to its axis.  A bend or junction underneath would be roofed at its
+        # decision point and is too subtle to accept without simulation.
+        perpendicular = ((0, -1), (0, 1)) if plan.axis == "x" else ((-1, 0), (1, 0))
+        if any(self.net_at(_add(plan.crossing, step)) != under for step in perpendicular):
+            return False
+
+        for endpoint in (plan.entry, plan.exit):
+            if self.net_at(endpoint) != net and not self.can_hold_dust(endpoint, net):
+                return False
+
+        # Ramp blocks occupy y=1.  The cells under the high span stay empty
+        # so no later route can create a slope into the crossing structure.
+        for offset in (-2, -1, 1, 2):
+            cell = plan.cell(offset)
+            if not self.is_free(cell) or cell in self.frozen:
+                return False
+        return True
+
 
 # --------------------------------------------------------------------------
 # the synthesiser
