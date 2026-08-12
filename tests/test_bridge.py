@@ -7,7 +7,7 @@ from daedalus.grid import Grid
 from daedalus.redsim import Pass, Verifier
 from daedalus.spec import Spec
 from daedalus.synth.bridge import BridgePlan
-from daedalus.synth.place import Component, Layout, Synthesiser
+from daedalus.synth.place import Component, Layout, RoutingFailure, Synthesiser
 
 
 @pytest.fixture(scope="module")
@@ -152,3 +152,27 @@ def test_layout_rejects_a_bend_under_the_bridge():
         layout.place_dust(cell, net=1)
 
     assert not layout.can_place_bridge(BridgePlan((8, 8), "x"), net=0)
+
+
+def test_layout_commits_bridge_endpoints_supports_and_reservations():
+    layout = crossing_layout()
+    plan = BridgePlan((8, 8), "x")
+
+    layout.place_bridge(plan, net=0)
+
+    assert layout.bridges == {0: [plan]}
+    assert layout.net_at(plan.entry) == 0
+    assert layout.net_at(plan.exit) == 0
+    assert layout.component_at(plan.cell(-2)).kind == "bridge_support"
+    assert layout.component_at(plan.cell(2)).kind == "bridge_support"
+    assert plan.cell(-1) in layout.frozen
+    assert plan.cell(1) in layout.frozen
+
+
+def test_layout_reports_an_unsafe_bridge_as_a_routing_stage():
+    layout = Layout(Grid.with_substrate())
+
+    with pytest.raises(RoutingFailure, match="unsafe crossing") as raised:
+        layout.place_bridge(BridgePlan((8, 8), "x"), net=0)
+
+    assert raised.value.stage == "bridge"

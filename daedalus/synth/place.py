@@ -165,6 +165,21 @@ class Layout:
                 return False
         return True
 
+    def place_bridge(self, plan: BridgePlan, net: int) -> None:
+        """Commit a validated crossing and reserve its planar footprint."""
+        if not self.can_place_bridge(plan, net):
+            raise RoutingFailure("bridge", f"net {net}: unsafe crossing at {plan.crossing}")
+
+        plan.place(self.grid)
+        for endpoint in (plan.entry, plan.exit):
+            if self.net_at(endpoint) != net:
+                self.place_dust(endpoint, net)
+
+        for offset in (-2, 2):
+            self.add_component("bridge_support", plan.cell(offset), V.SOLID, {net})
+        self.frozen.update((plan.cell(-1), plan.cell(1)))
+        self.bridges.setdefault(net, []).append(plan)
+
 
 # --------------------------------------------------------------------------
 # the synthesiser
