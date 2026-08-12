@@ -294,3 +294,12 @@ def test_router_connect_falls_back_to_a_bridge_when_a_net_blocks_the_board():
     assert connected
     assert layout.bridges[0] == [BridgePlan((8, 8), "x")]
     assert (12, 8) in tree
+
+
+def test_router_bounds_bridge_search_after_two_committed_spans():
+    layout = wall_layout()
+    layout.bridges = {0: [BridgePlan((4, 4), "x"), BridgePlan((12, 12), "z")]}
+    synth = Synthesiser.__new__(Synthesiser)
+    synth.layout = layout
+
+    assert synth._search_bridge({(4, 8)}, {(12, 8)}, net=0) is None

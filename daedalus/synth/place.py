@@ -276,6 +276,10 @@ class Synthesiser:
     #: gate. Trial routing is the expensive part; past a handful of sites the
     #: problem is usually the previous gate's position, not this one's.
     SITE_TRIALS = 10
+    #: Crossing search is deliberately bounded. Two spans already consume ten
+    #: support blocks and twelve signal-strength hops; beyond that a fresh
+    #: placement is both cheaper and more likely to verify.
+    MAX_BRIDGES = 2
 
     def _place_and_route(self, g: int) -> None:
         gate = self.lib.inverter
@@ -812,6 +816,8 @@ class Synthesiser:
         forbid=None,
     ) -> BridgeRoute | None:
         """Find the shortest route that uses exactly one safe crossing."""
+        if sum(len(plans) for plans in self.layout.bridges.values()) >= self.MAX_BRIDGES:
+            return None
         routes = []
         for plan in self.layout.bridge_candidates(net):
             for entry, exit in ((plan.entry, plan.exit), (plan.exit, plan.entry)):
