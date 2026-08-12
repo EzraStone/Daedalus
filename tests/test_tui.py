@@ -118,7 +118,7 @@ class TestFailurePaths:
             assert "no layout" in str(pilot.app.query_one("#grid", GridView).render())
 
     @pytest.mark.asyncio
-    async def test_a_known_gap_explains_itself(self):
+    async def test_a_routing_failure_explains_itself(self):
         async with DaedalusApp().run_test() as pilot:
             await compile_in(pilot, XOR, attempts="3")
             verdict = pilot.app.query_one("#verdict", Verdict).text

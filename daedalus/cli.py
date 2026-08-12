@@ -35,9 +35,9 @@ def cmd_compile(args) -> int:
         print(f"could not build this spec: {attempt.stage}: {attempt.detail}", file=sys.stderr)
         if attempt.stage in ("routing", "placement"):
             print(
-                "\nThe planar router cannot build netlists that need a wire crossing\n"
-                "(XOR and multiplexers are the usual cases). See the scope note in\n"
-                "daedalus/synth/place.py.",
+                "\nRouting is placement-sensitive. Wire crossings use conservative\n"
+                "seven-cell bridges, so try more attempts or another seed; a dense\n"
+                "layout may still exceed the 16x6x16 build volume.",
                 file=sys.stderr,
             )
         return 1

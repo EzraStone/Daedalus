@@ -19,8 +19,7 @@ from daedalus.synth.library import load
 from daedalus.synth.netlist import MAX_FANOUT, NetlistError, compile_netlist, to_nor_form
 from daedalus.synth.place import Stats
 
-#: Gate shapes the planar v1 router handles. See
-#: :func:`test_crossbar_netlists_are_a_known_gap` for the ones it does not.
+#: Gate shapes covered by the procedural compiler regression suite.
 SUPPORTED = [
     ("Q = !A", "A"),
     ("Q = A & B", "A B"),
