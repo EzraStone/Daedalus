@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 
 from .. import vocab as V
 from ..grid import Grid
-from .bridge import BridgePlan
+from .bridge import BridgePlan, BridgeRoute
 from .library import Library, Orientation, load
 from .netlist import Driver, Netlist, Sink
 
@@ -783,6 +783,61 @@ class Synthesiser:
                     heapq.heappush(heap, (step, tick, nb))
                     tick += 1
         return None
+
+    def _search_bridge(
+        self,
+        start: set[Cell],
+        goal: set[Cell],
+        net: int,
+        forbid=None,
+    ) -> BridgeRoute | None:
+        """Find the shortest route that uses exactly one safe crossing."""
+        routes = []
+        for plan in self.layout.bridge_candidates(net):
+            for entry, exit in ((plan.entry, plan.exit), (plan.exit, plan.entry)):
+                footprint = plan.footprint
+
+                def bridge_forbid(cell, allowed, outer=forbid):
+                    return (cell in footprint and cell != allowed) or (
+                        outer is not None and outer(cell)
+                    )
+
+                lead = (
+                    [entry]
+                    if entry in start
+                    else self._search(
+                        start,
+                        {entry},
+                        net,
+                        forbid=lambda cell, allowed=entry: bridge_forbid(cell, allowed),
+                    )
+                )
+                if lead is None:
+                    continue
+                tail = (
+                    [exit]
+                    if exit in goal
+                    else self._search(
+                        {exit},
+                        goal,
+                        net,
+                        forbid=lambda cell, allowed=exit: bridge_forbid(cell, allowed),
+                    )
+                )
+                if tail is not None:
+                    routes.append(BridgeRoute(plan, tuple(lead), tuple(tail)))
+
+        if not routes:
+            return None
+        return min(
+            routes,
+            key=lambda route: (
+                route.wire_hops,
+                route.plan.crossing,
+                route.plan.axis,
+                route.lead,
+            ),
+        )
 
     def _commit_path(self, path: list[Cell], net: int, tree: set[Cell]) -> None:
         for cell in path:

@@ -245,3 +245,16 @@ def test_repeater_partitioning_keeps_bridge_endpoints_connected():
     reached = synth._split(tree, cut=(-1, -1), seed=plan.cell(-4), bridges=(plan,))
 
     assert reached == tree
+
+
+def test_router_finds_a_path_via_a_crossing_candidate():
+    layout = crossing_layout()
+    synth = Synthesiser.__new__(Synthesiser)
+    synth.layout = layout
+
+    route = synth._search_bridge({(4, 8)}, {(12, 8)}, net=0)
+
+    assert route is not None
+    assert route.plan == BridgePlan((8, 8), "x")
+    assert route.lead[-1] in {route.plan.entry, route.plan.exit}
+    assert route.tail[0] == route.plan.other_end(route.lead[-1])
