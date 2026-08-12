@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 
 from .. import vocab as V
 from ..grid import Grid
+from .bridge import BridgePlan
 from .library import Library, Orientation, load
 from .netlist import Driver, Netlist, Sink
 
@@ -85,6 +86,8 @@ class Layout:
     net_cells: dict[int, set[Cell]] = field(default_factory=dict)
     #: Cells holding an inserted repeater, keyed by net.
     repeaters: dict[int, list[Cell]] = field(default_factory=dict)
+    #: Multilayer crossings carried by each net.
+    bridges: dict[int, list[BridgePlan]] = field(default_factory=dict)
 
     # -- placement helpers -------------------------------------------------
 
@@ -266,6 +269,7 @@ class Synthesiser:
             set(lay.frozen),
             {k: set(v) for k, v in lay.net_cells.items()},
             {k: list(v) for k, v in lay.repeaters.items()},
+            {k: list(v) for k, v in lay.bridges.items()},
             dict(self.gate_at),
             dict(self.driver_comp),
             {k: set(v) for k, v in self.trees.items()},
@@ -280,6 +284,7 @@ class Synthesiser:
             frozen,
             net_cells,
             repeaters,
+            bridges,
             gate_at,
             driver_comp,
             trees,
@@ -292,6 +297,7 @@ class Synthesiser:
         lay.frozen = frozen
         lay.net_cells = net_cells
         lay.repeaters = repeaters
+        lay.bridges = bridges
         self.gate_at = gate_at
         self.driver_comp = driver_comp
         self.trees = trees

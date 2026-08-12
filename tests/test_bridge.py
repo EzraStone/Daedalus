@@ -7,6 +7,7 @@ from daedalus.grid import Grid
 from daedalus.redsim import Pass, Verifier
 from daedalus.spec import Spec
 from daedalus.synth.bridge import BridgePlan
+from daedalus.synth.place import Component, Layout, Synthesiser
 
 
 @pytest.fixture(scope="module")
@@ -102,3 +103,22 @@ def test_bridge_keeps_crossing_signals_electrically_independent(verifier):
     verdict = verifier.evaluate(grid, placed)
 
     assert isinstance(verdict, Pass), verdict
+
+
+def test_synthesiser_snapshots_preserve_bridge_state():
+    synth = Synthesiser.__new__(Synthesiser)
+    synth.layout = Layout(
+        grid=Grid.with_substrate(),
+        components=[Component("test", (1, 1))],
+        bridges={0: [BridgePlan((8, 8), "x")]},
+    )
+    synth.gate_at = {}
+    synth.driver_comp = {}
+    synth.trees = {}
+    synth.net_terminals = {}
+
+    snapshot = synth._snapshot()
+    synth.layout.bridges.clear()
+    synth._restore(snapshot)
+
+    assert synth.layout.bridges == {0: [BridgePlan((8, 8), "x")]}
