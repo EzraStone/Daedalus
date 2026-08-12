@@ -155,6 +155,13 @@ def crossing_layout(axis="x"):
     return layout
 
 
+def wall_layout():
+    layout = Layout(Grid.with_substrate())
+    for z in range(V.SZ):
+        layout.place_dust((8, z), net=1)
+    return layout
+
+
 @pytest.mark.parametrize("axis", ["x", "z"])
 def test_layout_accepts_a_perpendicular_foreign_net_as_an_underpass(axis):
     layout = crossing_layout(axis)
@@ -273,3 +280,17 @@ def test_router_commits_both_legs_of_a_bridge_route():
     assert route.plan in layout.bridges[0]
     assert {(4, 8), route.plan.entry, route.plan.exit, (12, 8)} <= tree
     assert layout.net_at((12, 8)) == 0
+
+
+def test_router_connect_falls_back_to_a_bridge_when_a_net_blocks_the_board():
+    layout = wall_layout()
+    layout.place_dust((4, 8), net=0)
+    synth = Synthesiser.__new__(Synthesiser)
+    synth.layout = layout
+    tree = {(4, 8)}
+
+    connected = synth._connect(tree, {(12, 8)}, net=0, tree=tree)
+
+    assert connected
+    assert layout.bridges[0] == [BridgePlan((8, 8), "x")]
+    assert (12, 8) in tree

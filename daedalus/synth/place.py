@@ -784,6 +784,25 @@ class Synthesiser:
                     tick += 1
         return None
 
+    def _connect(
+        self,
+        start: set[Cell],
+        goal: set[Cell],
+        net: int,
+        tree: set[Cell],
+        forbid=None,
+    ) -> bool:
+        """Connect two regions, preferring planar wire over a bridge."""
+        path = self._search(start, goal, net, forbid=forbid)
+        if path is not None:
+            self._commit_path(path, net, tree)
+            return True
+        route = self._search_bridge(start, goal, net, forbid=forbid)
+        if route is None:
+            return False
+        self._commit_bridge_route(route, net, tree)
+        return True
+
     def _search_bridge(
         self,
         start: set[Cell],
