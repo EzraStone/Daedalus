@@ -713,12 +713,15 @@ class Synthesiser:
             if approach in tree:
                 path = [approach, face]
             else:
-                lead = self._search(
-                    tree, {approach}, n, forbid=lambda c, f=face: _adjacent(c, f)
-                )
-                if lead is None:
+                if not self._connect(
+                    tree,
+                    {approach},
+                    n,
+                    tree,
+                    forbid=lambda c, f=face: _adjacent(c, f),
+                ):
                     continue
-                path = lead + [face]
+                path = [approach, face]
             self._commit_path(path, n, tree)
             self.layout.freeze_around(face, keep=approach)
             self.net_terminals.setdefault(n, []).append(face)
