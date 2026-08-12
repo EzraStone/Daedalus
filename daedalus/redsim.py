@@ -137,6 +137,17 @@ Verdict = Pass | Fail | Unstable | Malformed
 # --------------------------------------------------------------------------
 
 
+def _target_binaries(target: Path, os_name: str = os.name) -> tuple[Path, Path]:
+    """Return Cargo's release and debug verifier paths for this platform.
+
+    Cargo appends ``.exe`` to Windows binaries.  Keeping the platform detail
+    here makes the discovery rule testable on every CI host instead of only on
+    a Windows runner.
+    """
+    filename = "redsim.exe" if os_name == "nt" else "redsim"
+    return target / "release" / filename, target / "debug" / filename
+
+
 def find_binary(explicit: str | os.PathLike[str] | None = None) -> Path:
     """Locate the ``redsim`` executable.
 
@@ -152,7 +163,7 @@ def find_binary(explicit: str | os.PathLike[str] | None = None) -> Path:
     if env:
         candidates.append(Path(env))
     target = Path(os.environ.get("CARGO_TARGET_DIR", _REPO_ROOT / "target"))
-    candidates += [target / "release" / "redsim", target / "debug" / "redsim"]
+    candidates += _target_binaries(target)
     found = shutil.which("redsim")
     if found:
         candidates.append(Path(found))
