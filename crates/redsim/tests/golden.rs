@@ -937,8 +937,11 @@ fn golden_suite_matches_hand_derived_verdicts() {
         eprintln!("blessed {} cases into {}", rendered.len(), path.display());
         return;
     }
-    if snap != SNAPSHOT {
-        let want: Vec<&str> = SNAPSHOT.lines().collect();
+    // Git may materialise text fixtures with CRLF on Windows.  The snapshot
+    // records verdict content, not a platform-specific line-ending choice.
+    let expected = SNAPSHOT.replace("\r\n", "\n");
+    if snap != expected {
+        let want: Vec<&str> = expected.lines().collect();
         let got: Vec<&str> = snap.lines().collect();
         let mut diff = Vec::new();
         for i in 0..want.len().max(got.len()) {
