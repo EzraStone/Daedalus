@@ -171,23 +171,16 @@ class TestCompilation:
         assert d["attempts"] >= 1
         assert set(d) == {"attempts", "placed", "routed", "failures"}
 
-    def test_crossbar_netlists_are_a_known_gap(self, verifier):
+    def test_crossbar_netlists_use_the_bridging_router(self, verifier):
         """A signal and its complement feeding branches that reconverge needs a
-        wire crossing, and dust cannot cross dust on one layer.
-
-        XOR and multiplexers are the everyday examples. This is a scope limit
-        of the planar router, not a bug: v2's bridging router uses the y axis.
-        The test pins the behaviour so the gap is visible rather than folded
-        into a mysterious discard rate.
+        wire crossing, so at least one placement must use the elevated layer.
         """
         spec = make("Q = (A & B) | (!A & C)", "A B C")
-        outcomes = [
-            compile(spec, verifier, random.Random(s), attempts=6).ok for s in range(4)
-        ]
-        assert not any(outcomes), (
-            "the planar router unexpectedly built a crossbar; if this is real, "
-            "update the documented scope in synth/place.py and the README"
-        )
+        outcomes = [compile(spec, verifier, random.Random(s), attempts=20) for s in range(4)]
+        built = [attempt for attempt in outcomes if attempt.ok]
+
+        assert built, "the bridging router should cover at least one crossbar placement"
+        assert any(3 in attempt.grid.occupied_layers() for attempt in built)
 
 
 class TestNetlistErrors:

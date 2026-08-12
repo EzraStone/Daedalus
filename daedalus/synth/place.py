@@ -496,7 +496,7 @@ class Synthesiser:
         block = _add(anchor, orient.block)
         span = max(max_depth, 1)
         # Spread the depth levels across the usable columns.
-        target_x = 3 + (V.SX - 7) * depth / (span + 1)
+        target_x = 5 + (V.SX - 9) * depth / (span + 1)
         cost = 2.0 * abs(block[0] - target_x)
 
         in_net = self.net.nets[self.net.inverter_input[g]]
