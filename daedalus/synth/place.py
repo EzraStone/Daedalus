@@ -1089,6 +1089,11 @@ def _adjacent(a: Cell, b: Cell) -> bool:
     return _manhattan(a, b) == 1
 
 
-def synthesise(netlist: Netlist, placed_spec, rng: random.Random) -> Grid:
+def synthesise(
+    netlist: Netlist,
+    placed_spec,
+    rng: random.Random,
+    library: Library | None = None,
+) -> Grid:
     """Place and route once. Raises :class:`RoutingFailure` if it does not fit."""
-    return Synthesiser(netlist, placed_spec, rng).run()
+    return Synthesiser(netlist, placed_spec, rng, library=library).run()

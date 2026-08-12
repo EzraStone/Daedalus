@@ -132,6 +132,17 @@ class TestCompilation:
                 return
         pytest.fail(f"{rule} did not compile in six tries")
 
+    def test_explicit_gate_library_reaches_the_synthesiser(self, verifier):
+        attempt = compile(
+            make("Q = !A", "A"),
+            verifier,
+            random.Random(0),
+            attempts=8,
+            library=load(),
+        )
+
+        assert attempt.ok, attempt
+
     def test_output_of_the_compiler_is_always_verified(self, verifier):
         # The compiler never reports success on an unchecked grid.
         spec = make("Q = A & B", "A B")
