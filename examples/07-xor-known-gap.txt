@@ -1,4 +1,0 @@
-# XOR — a known gap: needs a wire crossing the planar router cannot build
-inputs A B
-outputs Q
-Q = A ^ B
