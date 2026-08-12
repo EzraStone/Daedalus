@@ -6,7 +6,7 @@ from daedalus import vocab as V
 from daedalus.grid import Grid
 from daedalus.redsim import Pass, Verifier
 from daedalus.spec import Spec
-from daedalus.synth.bridge import BridgePlan
+from daedalus.synth.bridge import BridgePlan, BridgeRoute
 from daedalus.synth.place import Component, Layout, RoutingFailure, Synthesiser
 
 
@@ -53,6 +53,18 @@ def test_bridge_exposes_its_virtual_edge_and_signal_cost():
     assert bridge.other_end(bridge.exit) == bridge.entry
     with pytest.raises(ValueError, match="not a bridge endpoint"):
         bridge.other_end(bridge.crossing)
+
+
+def test_bridge_route_combines_planar_and_elevated_costs():
+    plan = BridgePlan((8, 8), "x")
+    route = BridgeRoute(
+        plan,
+        lead=((3, 8), (4, 8), plan.entry),
+        tail=(plan.exit, (12, 8), (13, 8)),
+    )
+
+    assert route.wire_hops == 10
+    assert route.ground_cells == {(3, 8), (4, 8), (5, 8), (11, 8), (12, 8), (13, 8)}
 
 
 def test_bridge_stamps_supported_dust_without_touching_the_underpass():

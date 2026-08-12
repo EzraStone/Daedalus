@@ -103,3 +103,23 @@ class BridgePlan:
     @property
     def in_bounds(self) -> bool:
         return all(V.in_bounds(x, y, z) for x, y, z in (*self.dust, *self.supports))
+
+
+@dataclass(frozen=True, slots=True)
+class BridgeRoute:
+    """Two planar path segments joined by one elevated crossing."""
+
+    plan: BridgePlan
+    lead: tuple[Cell, ...]
+    tail: tuple[Cell, ...]
+
+    @property
+    def wire_hops(self) -> int:
+        """Total signal-strength cost of the new route."""
+        planar = max(0, len(self.lead) - 1) + max(0, len(self.tail) - 1)
+        return planar + self.plan.wire_hops
+
+    @property
+    def ground_cells(self) -> frozenset[Cell]:
+        """Planar wire cells added before and after the bridge."""
+        return frozenset((*self.lead, *self.tail))
