@@ -200,6 +200,18 @@ def test_layout_reports_an_unsafe_bridge_as_a_routing_stage():
     assert raised.value.stage == "bridge"
 
 
+def test_layout_discovers_the_axis_perpendicular_to_an_underpass():
+    layout = crossing_layout(axis="x")
+
+    assert layout.bridge_candidates(net=0) == [BridgePlan((8, 8), "x")]
+
+
+def test_layout_does_not_offer_crossings_for_the_underpassing_net():
+    layout = crossing_layout(axis="x")
+
+    assert layout.bridge_candidates(net=1) == []
+
+
 def test_router_connectivity_treats_a_bridge_as_one_net():
     layout = crossing_layout()
     plan = BridgePlan((8, 8), "x")

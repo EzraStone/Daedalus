@@ -180,6 +180,18 @@ class Layout:
         self.frozen.update((plan.cell(-1), plan.cell(1)))
         self.bridges.setdefault(net, []).append(plan)
 
+    def bridge_candidates(self, net: int) -> list[BridgePlan]:
+        """Safe crossings over foreign dust, in deterministic order."""
+        plans = []
+        for cell, (kind, other) in self.occupied.items():
+            if kind != "dust" or other == net:
+                continue
+            for axis in ("x", "z"):
+                plan = BridgePlan(cell, axis)
+                if self.can_place_bridge(plan, net):
+                    plans.append(plan)
+        return sorted(plans, key=lambda plan: (*plan.crossing, plan.axis))
+
 
 # --------------------------------------------------------------------------
 # the synthesiser
