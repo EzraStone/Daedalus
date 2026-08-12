@@ -1,0 +1,10 @@
+# Repository text is canonical LF so generated snapshots and shell tooling are
+# byte-identical on Windows and Unix checkouts.
+* text=auto eol=lf
+
+# These formats are binary even when Git's heuristics see long text-like runs.
+*.litematic binary
+*.npz binary
+*.schem binary
+*.png binary
+*.webp binary
