@@ -877,13 +877,26 @@ class Synthesiser:
                 )
         raise RoutingFailure("signal", f"net {net} still too long after four repeaters")
 
-    def _split(self, tree: set[Cell], cut: Cell, seed: Cell) -> set[Cell]:
+    def _split(
+        self,
+        tree: set[Cell],
+        cut: Cell,
+        seed: Cell,
+        bridges: list[BridgePlan] | tuple[BridgePlan, ...] = (),
+    ) -> set[Cell]:
         """The part of the tree still reachable from ``seed`` once ``cut`` goes."""
+        bridge_neighbours: dict[Cell, Cell] = {}
+        for bridge in bridges:
+            bridge_neighbours[bridge.entry] = bridge.exit
+            bridge_neighbours[bridge.exit] = bridge.entry
         seen = {seed}
         queue = deque([seed])
         while queue:
             cur = queue.popleft()
-            for nb in neighbours(cur):
+            linked = list(neighbours(cur))
+            if cur in bridge_neighbours:
+                linked.append(bridge_neighbours[cur])
+            for nb in linked:
                 if nb in tree and nb != cut and nb not in seen:
                     seen.add(nb)
                     queue.append(nb)
@@ -922,8 +935,9 @@ class Synthesiser:
             ):
                 continue
 
-            side_a = self._split(tree, cell, links[0])
-            side_b = self._split(tree, cell, links[1])
+            bridges = self.layout.bridges.get(net, ())
+            side_a = self._split(tree, cell, links[0], bridges)
+            side_b = self._split(tree, cell, links[1], bridges)
             if side_a & side_b:
                 continue  # cutting here does not actually split the net
             if driver_cells <= side_a and needy & side_b:

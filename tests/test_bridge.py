@@ -211,3 +211,13 @@ def test_signal_propagation_charges_for_every_elevated_wire_hop():
 
     assert synth._propagate(0, {plan.entry}, limit=15)[plan.exit] == plan.wire_hops
     assert plan.exit not in synth._propagate(0, {plan.entry}, limit=plan.wire_hops - 1)
+
+
+def test_repeater_partitioning_keeps_bridge_endpoints_connected():
+    plan = BridgePlan((8, 8), "x")
+    tree = {plan.cell(-4), plan.entry, plan.exit, plan.cell(4)}
+    synth = Synthesiser.__new__(Synthesiser)
+
+    reached = synth._split(tree, cut=(-1, -1), seed=plan.cell(-4), bridges=(plan,))
+
+    assert reached == tree
