@@ -4,7 +4,15 @@ import pytest
 
 from daedalus import vocab as V
 from daedalus.grid import Grid
+from daedalus.redsim import Pass, Verifier
+from daedalus.spec import Spec
 from daedalus.synth.bridge import BridgePlan
+
+
+@pytest.fixture(scope="module")
+def verifier():
+    with Verifier() as running:
+        yield running
 
 
 def test_bridge_climbs_two_layers_over_the_crossing():
@@ -62,3 +70,35 @@ def test_bridge_refuses_a_partial_stamp_at_the_world_edge():
 
     with pytest.raises(ValueError, match="outside the build volume"):
         BridgePlan((2, 8), "x").place(grid)
+
+
+def test_bridge_keeps_crossing_signals_electrically_independent(verifier):
+    grid = Grid.with_substrate()
+    placed = Spec.parse("inputs A B\noutputs Q R\nQ = A\nR = B").place((8, 4), (8, 12))
+
+    for z in (8, 4):
+        grid.set(0, 1, z, V.lever(V.Dir4.EAST))
+        grid.set(1, 1, z, V.SOLID)
+    for z in (8, 12):
+        grid.set(14, 1, z, V.repeater(V.Dir4.EAST, 1))
+        grid.set(15, 1, z, V.LAMP)
+
+    for x in range(2, 6):
+        grid.set(x, 1, 8, V.WIRE)
+    BridgePlan((8, 8), "x").place(grid)
+    for x in range(11, 14):
+        grid.set(x, 1, 8, V.WIRE)
+
+    for x in range(2, 9):
+        grid.set(x, 1, 4, V.WIRE)
+    for z in range(4, 9):
+        grid.set(8, 1, z, V.WIRE)
+    grid.set(8, 1, 9, V.repeater(V.Dir4.SOUTH, 1))
+    for z in range(10, 13):
+        grid.set(8, 1, z, V.WIRE)
+    for x in range(8, 14):
+        grid.set(x, 1, 12, V.WIRE)
+
+    verdict = verifier.evaluate(grid, placed)
+
+    assert isinstance(verdict, Pass), verdict
