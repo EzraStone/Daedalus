@@ -186,3 +186,16 @@ def test_layout_reports_an_unsafe_bridge_as_a_routing_stage():
         layout.place_bridge(BridgePlan((8, 8), "x"), net=0)
 
     assert raised.value.stage == "bridge"
+
+
+def test_router_connectivity_treats_a_bridge_as_one_net():
+    layout = crossing_layout()
+    plan = BridgePlan((8, 8), "x")
+    layout.place_bridge(plan, net=0)
+    synth = Synthesiser.__new__(Synthesiser)
+
+    planar = synth._components({plan.entry, plan.exit})
+    connected = synth._components({plan.entry, plan.exit}, layout.bridges[0])
+
+    assert len(planar) == 2
+    assert connected == [{plan.entry, plan.exit}]

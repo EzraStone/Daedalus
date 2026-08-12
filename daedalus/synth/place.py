@@ -560,8 +560,14 @@ class Synthesiser:
 
     # -- routing -----------------------------------------------------------
 
-    def _components(self, cells: set[Cell]) -> list[set[Cell]]:
-        """Split a cell set into connected regions."""
+    def _components(
+        self, cells: set[Cell], bridges: list[BridgePlan] | tuple[BridgePlan, ...] = ()
+    ) -> list[set[Cell]]:
+        """Split cells into regions, treating bridges as virtual edges."""
+        bridge_neighbours: dict[Cell, Cell] = {}
+        for bridge in bridges:
+            bridge_neighbours[bridge.entry] = bridge.exit
+            bridge_neighbours[bridge.exit] = bridge.entry
         remaining = set(cells)
         out = []
         while remaining:
@@ -570,7 +576,10 @@ class Synthesiser:
             queue = deque([seed])
             while queue:
                 cur = queue.popleft()
-                for nb in neighbours(cur):
+                linked = list(neighbours(cur))
+                if cur in bridge_neighbours:
+                    linked.append(bridge_neighbours[cur])
+                for nb in linked:
                     if nb in remaining and nb not in comp:
                         comp.add(nb)
                         queue.append(nb)
@@ -590,7 +599,7 @@ class Synthesiser:
             raise RoutingFailure("routing", f"net {n}: driver {missing[0]} was never seeded")
 
         while True:
-            comps = self._components(tree)
+            comps = self._components(tree, self.layout.bridges.get(n, ()))
             if len(comps) <= 1:
                 return tree
             comps.sort(key=len, reverse=True)
