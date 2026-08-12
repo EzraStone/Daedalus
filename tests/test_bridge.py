@@ -2,6 +2,8 @@
 
 import pytest
 
+from daedalus import vocab as V
+from daedalus.grid import Grid
 from daedalus.synth.bridge import BridgePlan
 
 
@@ -32,3 +34,31 @@ def test_bridge_rejects_unknown_axes(axis):
 def test_bridge_reports_build_volume_edges():
     assert BridgePlan((8, 8), "x").in_bounds
     assert not BridgePlan((2, 8), "x").in_bounds
+
+
+def test_bridge_stamps_supported_dust_without_touching_the_underpass():
+    grid = Grid.with_substrate()
+    bridge = BridgePlan((8, 8), "x")
+    grid.set(8, V.LOGIC_Y, 8, V.WIRE)
+
+    bridge.place(grid)
+
+    assert all(grid.get(*voxel) == V.WIRE for voxel in bridge.dust)
+    assert all(grid.get(*voxel) == V.SOLID for voxel in bridge.supports)
+    assert grid.get(8, V.LOGIC_Y, 8) == V.WIRE
+
+
+def test_bridge_refuses_to_overwrite_elevated_material():
+    grid = Grid.with_substrate()
+    bridge = BridgePlan((8, 8), "z")
+    grid.set(*bridge.dust[3], V.LAMP)
+
+    with pytest.raises(ValueError, match="obstructed"):
+        bridge.place(grid)
+
+
+def test_bridge_refuses_a_partial_stamp_at_the_world_edge():
+    grid = Grid.with_substrate()
+
+    with pytest.raises(ValueError, match="outside the build volume"):
+        BridgePlan((2, 8), "x").place(grid)
