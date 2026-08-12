@@ -258,3 +258,18 @@ def test_router_finds_a_path_via_a_crossing_candidate():
     assert route.plan == BridgePlan((8, 8), "x")
     assert route.lead[-1] in {route.plan.entry, route.plan.exit}
     assert route.tail[0] == route.plan.other_end(route.lead[-1])
+
+
+def test_router_commits_both_legs_of_a_bridge_route():
+    layout = crossing_layout()
+    layout.place_dust((4, 8), net=0)
+    synth = Synthesiser.__new__(Synthesiser)
+    synth.layout = layout
+    tree = {(4, 8)}
+    route = synth._search_bridge(tree, {(12, 8)}, net=0)
+
+    synth._commit_bridge_route(route, net=0, tree=tree)
+
+    assert route.plan in layout.bridges[0]
+    assert {(4, 8), route.plan.entry, route.plan.exit, (12, 8)} <= tree
+    assert layout.net_at((12, 8)) == 0

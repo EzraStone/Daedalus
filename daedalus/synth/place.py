@@ -851,6 +851,13 @@ class Synthesiser:
             self.layout.place_dust(cell, net)
             tree.add(cell)
 
+    def _commit_bridge_route(self, route: BridgeRoute, net: int, tree: set[Cell]) -> None:
+        """Commit both planar legs and the elevated span between them."""
+        self._commit_path(list(route.lead), net, tree)
+        self.layout.place_bridge(route.plan, net)
+        tree.update((route.plan.entry, route.plan.exit))
+        self._commit_path(list(route.tail), net, tree)
+
     # -- signal strength ---------------------------------------------------
 
     def _propagate(self, net: int, starts: set[Cell], limit: int) -> dict[Cell, int]:
