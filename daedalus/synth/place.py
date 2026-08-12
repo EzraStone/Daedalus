@@ -667,10 +667,8 @@ class Synthesiser:
                 return
             if not self.layout.can_hold_dust(target, n):
                 raise RoutingFailure("routing", f"net {n}: output {sink.idx} terminal is blocked")
-            path = self._search(tree, {target}, n)
-            if path is None:
+            if not self._connect(tree, {target}, n, tree):
                 raise RoutingFailure("routing", f"net {n}: cannot reach output {sink.idx}")
-            self._commit_path(path, n, tree)
             self.net_terminals.setdefault(n, []).append(target)
             return
 
