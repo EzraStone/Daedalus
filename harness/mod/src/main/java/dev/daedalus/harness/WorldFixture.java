@@ -72,7 +72,9 @@ public final class WorldFixture {
                 throw new IllegalArgumentException("input " + i + " is not a lever at " + position);
             }
             boolean powered = ((assignment >>> i) & 1) != 0;
-            world.setBlockState(position, state.with(LeverBlock.POWERED, powered), Block.NOTIFY_ALL);
+            if (state.get(LeverBlock.POWERED) != powered) {
+                ((LeverBlock) state.getBlock()).togglePower(state, world, position);
+            }
         }
     }
 
