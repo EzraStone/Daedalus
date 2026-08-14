@@ -92,15 +92,16 @@ public final class HarnessServer implements Runnable {
 
     private String dispatch(Json.Obj request) throws Exception {
         String op = request.string("op");
-        String id = request.string("id");
         switch (op) {
             case "place": {
+                String id = request.string("id");
                 byte[] schematic = java.util.Base64.getDecoder()
                         .decode(request.string("schematic"));
                 runner.place(id, schematic);
                 return "{\"id\":" + Json.quote(id) + ",\"placed\":true}";
             }
             case "test": {
+                String id = request.string("id");
                 List<int[]> levers = request.positions("levers");
                 List<int[]> lamps = request.positions("lamps");
                 CircuitRunner.Result result = runner.sweep(id, levers, lamps);
