@@ -7,6 +7,8 @@ import java.io.OutputStreamWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,7 +51,9 @@ public final class HarnessServer implements Runnable {
 
     @Override
     public void run() {
-        try (ServerSocket server = new ServerSocket(port)) {
+        try (ServerSocket server = new ServerSocket()) {
+            server.setReuseAddress(true);
+            server.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), port));
             listener = server;
             while (running) {
                 try (Socket socket = server.accept()) {
