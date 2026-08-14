@@ -305,6 +305,12 @@ def run(cases: list[Case], verifier: Verifier, client: GameClient | None) -> Rep
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cases", type=int, default=200)
+    ap.add_argument(
+        "--suite",
+        choices=("random", "golden", "combined"),
+        default="combined",
+        help="select random cases, deterministic golden cases, or both",
+    )
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=25599)
@@ -317,7 +323,11 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     with Verifier() as verifier:
-        cases = build_cases(args.cases, args.seed, verifier)
+        cases = []
+        if args.suite in {"golden", "combined"}:
+            cases.extend(build_golden_cases())
+        if args.suite in {"random", "combined"}:
+            cases.extend(build_cases(args.cases, args.seed, verifier))
         if args.dry_run:
             report = run(cases, verifier, None)
         else:
