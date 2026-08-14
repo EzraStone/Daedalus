@@ -90,7 +90,7 @@ class Report:
 class GameClient:
     """Talks to the Fabric mod over a socket."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 25599, timeout: float = 60.0):
+    def __init__(self, host: str = "127.0.0.1", port: int = 25599, timeout: float = 300.0):
         self.address = (host, port)
         self.timeout = timeout
         self._sock: socket.socket | None = None
@@ -331,6 +331,12 @@ def main(argv=None) -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=25599)
     ap.add_argument(
+        "--timeout",
+        type=float,
+        default=300.0,
+        help="seconds to allow one real-game truth-table sweep",
+    )
+    ap.add_argument(
         "--dry-run",
         action="store_true",
         help="build and simulate the cases without contacting a server",
@@ -348,7 +354,7 @@ def main(argv=None) -> int:
             report = run(cases, verifier, None)
         else:
             try:
-                with GameClient(args.host, args.port) as client:
+                with GameClient(args.host, args.port, args.timeout) as client:
                     report = run(cases, verifier, client)
             except OSError as e:
                 print(
