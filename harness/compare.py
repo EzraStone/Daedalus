@@ -24,11 +24,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from daedalus import vocab as V  # noqa: E402
 from daedalus.data import sample_unique  # noqa: E402
+from daedalus.grid import Grid  # noqa: E402
 from daedalus.redsim import Malformed, Pass, Unstable, Verifier  # noqa: E402
 from daedalus.schematic import write_schem  # noqa: E402
 from daedalus.spec import PlacedSpec, Spec  # noqa: E402
 from daedalus.synth import compile as compile_spec  # noqa: E402
+from daedalus.synth.bridge import BridgePlan  # noqa: E402
 
 #: How a disagreement is classified, in the order they are likely to occur.
 DIVERGENCES = (
@@ -215,6 +218,38 @@ def build_cases(n: int, seed: int, verifier: Verifier) -> list[Case]:
         if attempt.ok:
             cases.append(Case(f"case-{i:05d}", spec, placed, attempt.grid.tokens()))
     return cases
+
+
+def build_bridge_case() -> Case:
+    """The hand-built independent-crossing circuit from the bridge golden test."""
+    grid = Grid.with_substrate()
+    spec = Spec.parse("inputs A B\noutputs Q R\nQ = A\nR = B")
+    placed = spec.place((8, 4), (8, 12))
+
+    for z in (8, 4):
+        grid.set(0, 1, z, V.lever(V.Dir4.EAST))
+        grid.set(1, 1, z, V.SOLID)
+    for z in (8, 12):
+        grid.set(14, 1, z, V.repeater(V.Dir4.EAST, 1))
+        grid.set(15, 1, z, V.LAMP)
+
+    for x in range(2, 6):
+        grid.set(x, 1, 8, V.WIRE)
+    BridgePlan((8, 8), "x").place(grid)
+    for x in range(11, 14):
+        grid.set(x, 1, 8, V.WIRE)
+
+    for x in range(2, 9):
+        grid.set(x, 1, 4, V.WIRE)
+    for z in range(4, 9):
+        grid.set(8, 1, z, V.WIRE)
+    grid.set(8, 1, 9, V.repeater(V.Dir4.SOUTH, 1))
+    for z in range(10, 13):
+        grid.set(8, 1, z, V.WIRE)
+    for x in range(8, 14):
+        grid.set(x, 1, 12, V.WIRE)
+
+    return Case("golden-bridge-independent", spec, placed, grid.tokens())
 
 
 def run(cases: list[Case], verifier: Verifier, client: GameClient | None) -> Report:
