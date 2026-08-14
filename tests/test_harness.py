@@ -2,10 +2,11 @@
 
 from daedalus import vocab as V
 from daedalus.grid import Grid
+from daedalus.redsim import Verifier
 from harness.compare import build_bridge_case, simulate
 
 
-def test_bridge_fidelity_case_is_elevated_and_passes_redsim(verifier):
+def test_bridge_fidelity_case_is_elevated_and_passes_redsim():
     case = build_bridge_case()
     grid = Grid.from_tokens(case.tokens)
 
@@ -16,6 +17,7 @@ def test_bridge_fidelity_case_is_elevated_and_passes_redsim(verifier):
         for x in range(V.SX)
     )
 
-    simulate(case, verifier)
+    with Verifier() as verifier:
+        simulate(case, verifier)
     assert case.settled
     assert case.simulated == [0, 1, 2, 3]
