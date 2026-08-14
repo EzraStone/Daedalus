@@ -6,6 +6,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +28,7 @@ public final class HarnessServer implements Runnable {
     private final int port;
     private final CircuitRunner runner;
     private volatile boolean running = true;
+    private volatile ServerSocket listener;
 
     public HarnessServer(int port, CircuitRunner runner) {
         this.port = port;
@@ -35,11 +37,20 @@ public final class HarnessServer implements Runnable {
 
     public void stop() {
         running = false;
+        ServerSocket socket = listener;
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (Exception ignored) {
+                // Closing an already closed listener is harmless during shutdown.
+            }
+        }
     }
 
     @Override
     public void run() {
         try (ServerSocket server = new ServerSocket(port)) {
+            listener = server;
             while (running) {
                 try (Socket socket = server.accept()) {
                     handle(socket);
@@ -49,8 +60,14 @@ public final class HarnessServer implements Runnable {
                     System.err.println("[daedalus] client error: " + e.getMessage());
                 }
             }
+        } catch (SocketException e) {
+            if (running) {
+                System.err.println("[daedalus] listener failed: " + e.getMessage());
+            }
         } catch (Exception e) {
             System.err.println("[daedalus] listener failed: " + e.getMessage());
+        } finally {
+            listener = null;
         }
     }
 
