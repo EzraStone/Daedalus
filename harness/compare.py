@@ -40,6 +40,10 @@ DIVERGENCES = (
 )
 
 
+class HarnessError(RuntimeError):
+    """The game harness accepted a request but could not execute it."""
+
+
 @dataclass
 class Case:
     name: str
@@ -107,7 +111,15 @@ class GameClient:
         line = self._file.readline()
         if not line:
             raise ConnectionError("the harness mod closed the connection")
-        return json.loads(line)
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ConnectionError("the harness returned invalid JSON") from exc
+        if not isinstance(response, dict):
+            raise ConnectionError("the harness returned a non-object response")
+        if "error" in response:
+            raise HarnessError(str(response["error"]))
+        return response
 
     def run_case(self, case: Case) -> tuple[list[int], bool]:
         with tempfile.TemporaryDirectory() as tmp:
@@ -116,7 +128,9 @@ class GameClient:
             path = Path(tmp) / f"{case.name}.schem"
             write_schem(Grid.from_tokens(case.tokens), path)
             blob = base64.b64encode(path.read_bytes()).decode()
-        self.request({"op": "place", "id": case.name, "schematic": blob})
+        placed = self.request({"op": "place", "id": case.name, "schematic": blob})
+        if placed.get("id") != case.name or placed.get("placed") is not True:
+            raise ConnectionError("the harness did not acknowledge schematic placement")
         got = self.request(
             {
                 "op": "test",
@@ -125,9 +139,13 @@ class GameClient:
                 "lamps": [list(p) for p in case.placed.output_ports],
             }
         )
+        if got.get("id") != case.name or not isinstance(got.get("rows"), list):
+            raise ConnectionError("the harness returned an invalid test response")
         n_in = len(case.placed.input_ports)
         rows = []
         for row in got["rows"]:
+            if not isinstance(row, list) or len(row) != n_in + len(case.placed.output_ports):
+                raise ConnectionError("the harness returned a malformed truth-table row")
             outputs = row[n_in:]
             rows.append(sum(bit << j for j, bit in enumerate(outputs)))
         return rows, bool(got.get("settled", True))
