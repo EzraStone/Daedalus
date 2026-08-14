@@ -252,6 +252,25 @@ def build_bridge_case() -> Case:
     return Case("golden-bridge-independent", spec, placed, grid.tokens())
 
 
+def build_direct_case() -> Case:
+    """A hand-built full-width signal path with an output repeater."""
+    grid = Grid.with_substrate()
+    spec = Spec.parse("inputs A\noutputs Q\nQ = A")
+    placed = spec.place((8,), (8,))
+    grid.set(0, 1, 8, V.lever(V.Dir4.EAST))
+    grid.set(1, 1, 8, V.SOLID)
+    for x in range(2, 14):
+        grid.set(x, 1, 8, V.WIRE)
+    grid.set(14, 1, 8, V.repeater(V.Dir4.EAST, 1))
+    grid.set(15, 1, 8, V.LAMP)
+    return Case("golden-direct-repeater", spec, placed, grid.tokens())
+
+
+def build_golden_cases() -> list[Case]:
+    """Return the deterministic real-game regression suite."""
+    return [build_direct_case(), build_bridge_case()]
+
+
 def run(cases: list[Case], verifier: Verifier, client: GameClient | None) -> Report:
     report = Report()
     for case in cases:
