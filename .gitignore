@@ -15,6 +15,7 @@ venv/
 /.tools/
 /harness/mod/.gradle/
 /harness/mod/build/
+/harness/mod/logs/
 /harness/server/runtime/
 
 # Generated data and runs
