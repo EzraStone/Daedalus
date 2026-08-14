@@ -24,10 +24,13 @@ import net.minecraft.server.MinecraftServer;
 public final class CircuitRunner {
     /** Matches redsim's DEFAULT_MAX_GAME_TICKS. */
     public static final int SETTLE_CAP_TICKS = 200;
+    /** Longer than the maximum repeater delay, so delayed work cannot look settled. */
+    public static final int QUIET_TICKS = 10;
 
     private final MinecraftServer server;
     private final WorldFixture fixture;
     private final Map<String, Schematic> schematics = new ConcurrentHashMap<>();
+    private SweepJob activeSweep;
 
     public CircuitRunner(MinecraftServer server) {
         this.server = server;
@@ -63,9 +66,35 @@ public final class CircuitRunner {
      * circuit's history dependence instead of its truth table, and the two
      * sides would disagree for a reason that has nothing to do with fidelity.
      */
-    public Result sweep(String id, List<int[]> levers, List<int[]> lamps) {
-        throw new UnsupportedOperationException(
-                "sweep() needs a running Fabric server; see harness/mod/README.md");
+    public Result sweep(String id, List<int[]> levers, List<int[]> lamps) throws Exception {
+        Schematic schematic = schematics.get(id);
+        if (schematic == null) {
+            throw new IllegalArgumentException("unknown schematic id " + id);
+        }
+        List<int[]> safeLevers = validatePorts("lever", levers, schematic);
+        List<int[]> safeLamps = validatePorts("lamp", lamps, schematic);
+        if (safeLevers.size() > 12) {
+            throw new IllegalArgumentException("at most 12 input levers are supported");
+        }
+
+        SweepJob job = callOnServer(() -> {
+            if (activeSweep != null) {
+                throw new IllegalStateException("another sweep is already running");
+            }
+            SweepJob created = new SweepJob(schematic, safeLevers, safeLamps);
+            activeSweep = created;
+            created.beginAssignment();
+            return created;
+        });
+        return job.completed.get(15, TimeUnit.MINUTES);
+    }
+
+    /** Advances a sweep once per real game tick. Called by the Fabric tick event. */
+    public void tick(MinecraftServer tickingServer) {
+        if (tickingServer != server || activeSweep == null) {
+            return;
+        }
+        activeSweep.tick();
     }
 
     private <T> T callOnServer(Callable<T> operation) throws Exception {
@@ -81,5 +110,85 @@ public final class CircuitRunner {
             }
         });
         return completed.get(60, TimeUnit.SECONDS);
+    }
+
+    private static List<int[]> validatePorts(
+            String kind, List<int[]> ports, Schematic schematic) {
+        List<int[]> copy = new ArrayList<>(ports.size());
+        for (int i = 0; i < ports.size(); i++) {
+            int[] position = ports.get(i);
+            if (position == null || position.length != 3) {
+                throw new IllegalArgumentException(kind + " " + i + " must be an [x,y,z] position");
+            }
+            if (position[0] < 0 || position[0] >= schematic.width()
+                    || position[1] < 0 || position[1] >= schematic.height()
+                    || position[2] < 0 || position[2] >= schematic.length()) {
+                throw new IllegalArgumentException(kind + " " + i + " lies outside the schematic");
+            }
+            copy.add(position.clone());
+        }
+        return List.copyOf(copy);
+    }
+
+    private final class SweepJob {
+        private final Schematic schematic;
+        private final List<int[]> levers;
+        private final List<int[]> lamps;
+        private final int assignments;
+        private final Result result = new Result();
+        private final CompletableFuture<Result> completed = new CompletableFuture<>();
+        private int assignment;
+        private int elapsedTicks;
+        private int quietTicks;
+        private long lastFingerprint;
+
+        private SweepJob(Schematic schematic, List<int[]> levers, List<int[]> lamps) {
+            this.schematic = schematic;
+            this.levers = levers;
+            this.lamps = lamps;
+            this.assignments = 1 << levers.size();
+        }
+
+        private void beginAssignment() {
+            fixture.replace(schematic);
+            fixture.applyInputs(levers, assignment);
+            lastFingerprint = fixture.fingerprint();
+            elapsedTicks = 0;
+            quietTicks = 0;
+        }
+
+        private void tick() {
+            try {
+                elapsedTicks++;
+                long fingerprint = fixture.fingerprint();
+                if (fingerprint == lastFingerprint) {
+                    quietTicks++;
+                } else {
+                    quietTicks = 0;
+                    lastFingerprint = fingerprint;
+                }
+
+                if (quietTicks >= QUIET_TICKS) {
+                    result.rows.add(fixture.readRow(levers, lamps, assignment));
+                    assignment++;
+                    if (assignment == assignments) {
+                        finish();
+                    } else {
+                        beginAssignment();
+                    }
+                } else if (elapsedTicks >= SETTLE_CAP_TICKS) {
+                    result.settled = false;
+                    finish();
+                }
+            } catch (Throwable error) {
+                completed.completeExceptionally(error);
+                activeSweep = null;
+            }
+        }
+
+        private void finish() {
+            completed.complete(result);
+            activeSweep = null;
+        }
     }
 }
