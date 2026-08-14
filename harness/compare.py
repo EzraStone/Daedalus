@@ -287,9 +287,14 @@ def build_golden_cases() -> list[Case]:
     return [build_direct_case(), build_bridge_case()]
 
 
-def run(cases: list[Case], verifier: Verifier, client: GameClient | None) -> Report:
+def run(
+    cases: list[Case],
+    verifier: Verifier,
+    client: GameClient | None,
+    progress_every: int = 0,
+) -> Report:
     report = Report()
-    for case in cases:
+    for index, case in enumerate(cases, 1):
         report.cases += 1
         simulate(case, verifier)
         if client is None:
@@ -314,6 +319,13 @@ def run(cases: list[Case], verifier: Verifier, client: GameClient | None) -> Rep
                     "observed": case.observed,
                     "divergence": kind,
                 }
+            )
+        if progress_every > 0 and (index % progress_every == 0 or index == len(cases)):
+            print(
+                f"checked {index}/{len(cases)}: {report.agreed} agree, "
+                f"{report.unreachable} unreachable",
+                file=sys.stderr,
+                flush=True,
             )
     return report
 
@@ -342,6 +354,12 @@ def main(argv=None) -> int:
         help="build and simulate the cases without contacting a server",
     )
     ap.add_argument("--out", help="write the JSON report here")
+    ap.add_argument(
+        "--progress-every",
+        type=int,
+        default=100,
+        help="print progress after this many cases; zero disables it",
+    )
     args = ap.parse_args(argv)
 
     with Verifier() as verifier:
@@ -351,11 +369,11 @@ def main(argv=None) -> int:
         if args.suite in {"random", "combined"}:
             cases.extend(build_cases(args.cases, args.seed, verifier))
         if args.dry_run:
-            report = run(cases, verifier, None)
+            report = run(cases, verifier, None, args.progress_every)
         else:
             try:
                 with GameClient(args.host, args.port, args.timeout) as client:
-                    report = run(cases, verifier, client)
+                    report = run(cases, verifier, client, args.progress_every)
             except OSError as e:
                 print(
                     f"could not reach the harness mod at {args.host}:{args.port}: {e}\n"
