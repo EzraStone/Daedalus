@@ -210,13 +210,29 @@ def classify(case: Case) -> str:
 def build_cases(n: int, seed: int, verifier: Verifier) -> list[Case]:
     rng = random.Random(seed)
     cases: list[Case] = []
-    for i, spec in enumerate(sample_unique(rng, n * 3)):
-        if len(cases) >= n:
+    seen: set[int] = set()
+    candidate = 0
+    max_candidates = max(50, n * 20)
+    while len(cases) < n and candidate < max_candidates:
+        batch_size = min(256, max_candidates - candidate, max(16, (n - len(cases)) * 4))
+        specs = sample_unique(rng, batch_size, seen=seen)
+        if not specs:
             break
-        placed = spec.default_placement(rng)
-        attempt = compile_spec(spec, verifier, rng, attempts=10, fixed_placement=placed)
-        if attempt.ok:
-            cases.append(Case(f"case-{i:05d}", spec, placed, attempt.grid.tokens()))
+        for spec in specs:
+            if len(cases) >= n or candidate >= max_candidates:
+                break
+            placed = spec.default_placement(rng)
+            attempt = compile_spec(spec, verifier, rng, attempts=10, fixed_placement=placed)
+            if attempt.ok:
+                cases.append(
+                    Case(f"case-{candidate:05d}", spec, placed, attempt.grid.tokens())
+                )
+            candidate += 1
+    if len(cases) != n:
+        raise RuntimeError(
+            f"compiled only {len(cases)} of {n} requested random cases "
+            f"after {candidate} candidates"
+        )
     return cases
 
 
