@@ -3,6 +3,7 @@ package dev.daedalus.harness;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -48,7 +49,10 @@ public final class CircuitRunner {
         }
         Schematic schematic = SpongeSchematic.decode(payload);
         schematics.put(id, schematic);
-        runOnServer(() -> fixture.replace(schematic));
+        callOnServer(() -> {
+            fixture.replace(schematic);
+            return null;
+        });
     }
 
     /**
@@ -64,16 +68,18 @@ public final class CircuitRunner {
                 "sweep() needs a running Fabric server; see harness/mod/README.md");
     }
 
-    private void runOnServer(Runnable operation) throws Exception {
-        CompletableFuture<Void> completed = new CompletableFuture<>();
+    private <T> T callOnServer(Callable<T> operation) throws Exception {
+        if (server.isOnThread()) {
+            return operation.call();
+        }
+        CompletableFuture<T> completed = new CompletableFuture<>();
         server.execute(() -> {
             try {
-                operation.run();
-                completed.complete(null);
+                completed.complete(operation.call());
             } catch (Throwable error) {
                 completed.completeExceptionally(error);
             }
         });
-        completed.get(60, TimeUnit.SECONDS);
+        return completed.get(60, TimeUnit.SECONDS);
     }
 }
