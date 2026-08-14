@@ -8,7 +8,7 @@
   "license": "MIT",
   "environment": "server",
   "entrypoints": {
-    "server": ["dev.daedalus.harness.HarnessMod"]
+    "main": ["dev.daedalus.harness.HarnessMod"]
   },
   "depends": {
     "fabricloader": ">=0.19.3",
