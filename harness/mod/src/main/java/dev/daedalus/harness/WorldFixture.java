@@ -110,6 +110,11 @@ public final class WorldFixture {
         return hash;
     }
 
+    public boolean hasScheduledBlockTicks() {
+        requireServerThread();
+        return world.getBlockTickScheduler().getTickCount() > 0;
+    }
+
     private void clear(int width, int height, int length) {
         for (int y = -1; y <= height; y++) {
             for (int z = -1; z <= length; z++) {

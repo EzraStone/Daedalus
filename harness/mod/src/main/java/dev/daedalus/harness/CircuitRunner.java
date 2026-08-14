@@ -24,8 +24,8 @@ import net.minecraft.server.MinecraftServer;
 public final class CircuitRunner {
     /** Matches redsim's DEFAULT_MAX_GAME_TICKS. */
     public static final int SETTLE_CAP_TICKS = 200;
-    /** Longer than the maximum repeater delay, so delayed work cannot look settled. */
-    public static final int QUIET_TICKS = 10;
+    /** Consecutive unchanged ticks required after Minecraft's block queue drains. */
+    public static final int QUIET_TICKS = 2;
 
     private final MinecraftServer server;
     private final WorldFixture fixture;
@@ -168,7 +168,7 @@ public final class CircuitRunner {
                     lastFingerprint = fingerprint;
                 }
 
-                if (quietTicks >= QUIET_TICKS) {
+                if (quietTicks >= QUIET_TICKS && !fixture.hasScheduledBlockTicks()) {
                     result.rows.add(fixture.readRow(levers, lamps, assignment));
                     assignment++;
                     if (assignment == assignments) {
