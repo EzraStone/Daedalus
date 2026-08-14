@@ -20,7 +20,7 @@ public final class HarnessMod implements ModInitializer {
     public void onInitialize() {
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             int port = Integer.getInteger("daedalus.harness.port", DEFAULT_PORT);
-            harnessServer = new HarnessServer(port, new CircuitRunner());
+            harnessServer = new HarnessServer(port, new CircuitRunner(server));
             Thread thread = new Thread(harnessServer, "daedalus-harness");
             thread.setDaemon(true);
             thread.start();
