@@ -11,6 +11,12 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# Repository-local toolchains and Fabric runtime
+/.tools/
+/harness/mod/.gradle/
+/harness/mod/build/
+/harness/server/runtime/
+
 # Generated data and runs
 /data/
 /runs/
