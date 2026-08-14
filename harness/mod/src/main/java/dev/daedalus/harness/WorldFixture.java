@@ -57,6 +57,7 @@ public final class WorldFixture {
             }
         }
         components.forEach(this::set);
+        notifyPlacedBlocks(schematic);
         lastWidth = schematic.width();
         lastHeight = schematic.height();
         lastLength = schematic.length();
@@ -112,7 +113,7 @@ public final class WorldFixture {
             for (int z = -1; z <= length; z++) {
                 for (int x = -1; x <= width; x++) {
                     world.setBlockState(origin.add(x, y, z), Blocks.AIR.getDefaultState(),
-                            Block.NOTIFY_ALL | Block.FORCE_STATE | Block.SKIP_DROPS);
+                            Block.NOTIFY_LISTENERS | Block.FORCE_STATE | Block.SKIP_DROPS);
                 }
             }
         }
@@ -123,7 +124,22 @@ public final class WorldFixture {
     }
 
     private void set(Placement placement) {
-        world.setBlockState(placement.position(), placement.state(), Block.NOTIFY_ALL);
+        world.setBlockState(placement.position(), placement.state(),
+                Block.NOTIFY_LISTENERS | Block.FORCE_STATE | Block.SKIP_DROPS);
+    }
+
+    private void notifyPlacedBlocks(Schematic schematic) {
+        for (int y = 0; y < schematic.height(); y++) {
+            for (int z = 0; z < schematic.length(); z++) {
+                for (int x = 0; x < schematic.width(); x++) {
+                    BlockPos position = origin.add(x, y, z);
+                    BlockState state = world.getBlockState(position);
+                    if (!state.isAir()) {
+                        world.updateNeighborsAlways(position, state.getBlock());
+                    }
+                }
+            }
+        }
     }
 
     private void requireServerThread() {
