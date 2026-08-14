@@ -207,12 +207,62 @@ def classify(case: Case) -> str:
     return "unclassified"
 
 
-def build_cases(n: int, seed: int, verifier: Verifier) -> list[Case]:
+def _case_record(case: Case) -> dict:
+    return {
+        "name": case.name,
+        "spec": case.spec.source(ascii_only=True),
+        "input_z": list(case.placed.input_z),
+        "output_z": list(case.placed.output_z),
+        "tokens": case.tokens,
+    }
+
+
+def _case_from_record(record: dict) -> Case:
+    spec = Spec.parse(record["spec"])
+    placed = spec.place(record["input_z"], record["output_z"])
+    tokens = [int(token) for token in record["tokens"]]
+    Grid.from_tokens(tokens)
+    return Case(str(record["name"]), spec, placed, tokens)
+
+
+def _load_case_cache(path: Path, seed: int) -> list[Case]:
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return []
+    metadata = json.loads(lines[0])
+    if metadata != {"format": "daedalus-fidelity-corpus-v1", "seed": seed}:
+        raise ValueError(f"corpus cache metadata does not match seed {seed}")
+    return [_case_from_record(json.loads(line)) for line in lines[1:] if line.strip()]
+
+
+def _append_cached_case(path: Path, seed: int, case: Case) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists() or path.stat().st_size == 0:
+        metadata = {"format": "daedalus-fidelity-corpus-v1", "seed": seed}
+        path.write_text(json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8")
+    with path.open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(_case_record(case), separators=(",", ":")) + "\n")
+        stream.flush()
+
+
+def build_cases(
+    n: int,
+    seed: int,
+    verifier: Verifier,
+    cache_path: Path | None = None,
+) -> list[Case]:
     rng = random.Random(seed)
-    cases: list[Case] = []
-    seen: set[int] = set()
-    candidate = 0
-    max_candidates = max(50, n * 20)
+    cases = _load_case_cache(cache_path, seed) if cache_path else []
+    if len(cases) >= n:
+        return cases[:n]
+    seen = {case.spec.semantic_hash() for case in cases}
+    candidate = max(
+        (int(case.name.rsplit("-", 1)[1]) + 1 for case in cases if case.name.startswith("case-")),
+        default=0,
+    )
+    max_candidates = candidate + max(50, (n - len(cases)) * 20)
     while len(cases) < n and candidate < max_candidates:
         batch_size = min(256, max_candidates - candidate, max(16, (n - len(cases)) * 4))
         specs = sample_unique(rng, batch_size, seen=seen)
@@ -224,9 +274,10 @@ def build_cases(n: int, seed: int, verifier: Verifier) -> list[Case]:
             placed = spec.default_placement(rng)
             attempt = compile_spec(spec, verifier, rng, attempts=10, fixed_placement=placed)
             if attempt.ok:
-                cases.append(
-                    Case(f"case-{candidate:05d}", spec, placed, attempt.grid.tokens())
-                )
+                case = Case(f"case-{candidate:05d}", spec, placed, attempt.grid.tokens())
+                cases.append(case)
+                if cache_path:
+                    _append_cached_case(cache_path, seed, case)
             candidate += 1
     if len(cases) != n:
         raise RuntimeError(
@@ -355,6 +406,11 @@ def main(argv=None) -> int:
     )
     ap.add_argument("--out", help="write the JSON report here")
     ap.add_argument(
+        "--corpus-cache",
+        type=Path,
+        help="checkpoint accepted random cases as resumable JSON Lines",
+    )
+    ap.add_argument(
         "--progress-every",
         type=int,
         default=100,
@@ -367,7 +423,7 @@ def main(argv=None) -> int:
         if args.suite in {"golden", "combined"}:
             cases.extend(build_golden_cases())
         if args.suite in {"random", "combined"}:
-            cases.extend(build_cases(args.cases, args.seed, verifier))
+            cases.extend(build_cases(args.cases, args.seed, verifier, args.corpus_cache))
         if args.dry_run:
             report = run(cases, verifier, None, args.progress_every)
         else:
