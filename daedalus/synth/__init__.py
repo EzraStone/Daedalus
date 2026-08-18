@@ -103,6 +103,8 @@ def compile_attempts(
             yield Attempt(None, None, placed, e.stage, e.detail)
             continue
         stats.placed += 1
+        if 3 in grid.occupied_layers():
+            stats.bridged += 1
 
         verdict = verifier.evaluate(grid, placed)
         if isinstance(verdict, Pass):

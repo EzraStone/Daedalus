@@ -29,11 +29,9 @@ from ..spec.dsl import Binary, Not, ParsedSpec, Ref
 #: Operators §04 asks the DAG sampler to draw from.
 ALL_GATES = ("and", "or", "xor")
 
-#: The default set. XOR is drawn from only when asked for, because the planar
-#: router cannot build one — its netlist needs a wire crossing. Leaving it on
-#: by default would mean a third of every corpus silently failing to route and
-#: a discard rate that looks like a mystery rather than a known scope limit.
-ROUTABLE_GATES = ("and", "or")
+#: All combinational operators are routable. XOR prefers a planar NOR
+#: decomposition, while crossbar shapes can fall back to elevated bridges.
+ROUTABLE_GATES = ALL_GATES
 
 NAMES = ("A", "B", "C", "D", "E", "F")
 

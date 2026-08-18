@@ -179,10 +179,9 @@ def _scope_hint(stage: str) -> str | None:
     """Turn a failure stage into something a person can act on."""
     if stage in ("routing", "placement", "signal"):
         return (
-            "The planar router cannot build netlists that need a wire crossing — "
-            "a signal and its complement feeding branches that reconverge (XOR, "
-            "multiplexers). This is a documented scope limit, not a transient "
-            "failure; more attempts will not help. See docs/divergences.md."
+            "Routing is placement-sensitive. A wire crossing uses a conservative "
+            "seven-cell bridge, so more attempts or another seed can help; dense "
+            "layouts may still exceed the 16x6x16 build volume."
         )
     if stage == "netlist":
         return "The spec is outside the v1 primitive set entirely."

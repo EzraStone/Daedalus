@@ -1,0 +1,4 @@
+# 2:1 multiplexer — exercises the elevated bridging router
+inputs S A B
+outputs Q
+Q = (!S & A) | (S & B)

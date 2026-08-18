@@ -62,7 +62,7 @@ no README.
 |---|---|
 | `crates/redsim` — the verifier | Complete. 104-case golden suite, 35 tests, ~153 µs per evaluation in release. |
 | `daedalus.spec` — the DSL | Complete. Full grammar, canonicalisation, semantic hashing byte-identical to the Rust side. |
-| `daedalus.synth` — the procedural compiler | Working. 88% coverage on the gate set the planar router supports. |
+| `daedalus.synth` — the procedural compiler | Working. Planar routing plus verified two-level bridges for crossbar netlists. |
 | `daedalus.data` — the corpus engine | Working end to end. Builds, verifies, splits, writes a dataset card. |
 | `daedalus.schematic` — export | Complete. `.schem` and `.litematic`, dependency-free NBT. |
 | `daedalus.eval` — metrics and baselines | Complete. Three of four baselines runnable today. |
@@ -197,18 +197,25 @@ conducts one way and a stranded driver is silently disconnected.
 The verifier caught every one of these as a bug before it caught them as a
 feature.
 
-## The known scope limit
+## Crossbar routing
 
-The planar router cannot build netlists that need a **wire crossing**. When a
-signal and its complement feed separate branches that later reconverge — XOR,
-multiplexers — the netlist is a crossbar, and dust cannot cross dust on one
-layer. This is a scope limit, not a bug, and it is pinned by a test
-(`test_crossbar_netlists_are_a_known_gap`) so it stays visible rather than
-dissolving into a mysterious discard rate.
+When a planar search is blocked by another net, the router can now carry one
+signal over the other. A bridge climbs from `y=1` to `y=3`, crosses above a
+straight lower wire, and descends again. The lower wire remains electrically
+independent, which is checked against the Rust verifier over the complete
+two-input truth table.
+
+Bridge discovery is deliberately conservative: the underpass must be straight,
+the seven-cell span must be clear, and a layout may use at most two bridges.
+Placement is still stochastic, so a difficult crossbar can require several
+attempts. `Stats.bridged` exposes how many candidates reached the verifier with
+an elevated span, and `test_crossbar_netlists_use_the_bridging_router` prevents
+the feature from quietly regressing.
 
 XOR is compiled through `(a|b) & !(a&b)` instead of the obvious
 `(a&!b) | (!a&b)`: one more inverter and one more tick, but it lays out flat.
-Genuine crossings need a bridging router that uses the `y` axis, which is v2.
+The alternate XOR form remains useful because it is smaller and easier to
+route, while multiplexers and other genuine crossbars use the bridge fallback.
 
 ## Honest limitations
 
@@ -258,7 +265,7 @@ daedalus/
   vocab.py, grid.py       the token vocabulary, mirrored and parity-tested
   redsim.py               client for the verifier worker
   spec/                   DSL parser, canonicaliser, semantic hashing
-  synth/                  gate library (YAML), placer, congestion-aware router
+  synth/                  gate library, congestion-aware router, bridge geometry
   data/                   corpus build, splits, paraphrase
   models/                 autoregressive baseline + masked discrete diffusion
   train/loop.py           §06 verifier-guided rounds
@@ -281,8 +288,8 @@ docs/                     design spec, divergences, hardware notes
 3. **Run the loop.** Five rounds, plot pass@1 and `layouts_per_spec` on the same
    axes — the second is the collapse alarm and the whole approach fails quietly
    without it.
-4. **Bridging router.** Unlocks XOR, multiplexers and most of the interesting
-   half of combinational logic.
+4. **Broaden bridge coverage.** Measure crossbar success by topology, then add
+   compact vertical primitives for placements the conservative span rejects.
 
 ## Licence
 

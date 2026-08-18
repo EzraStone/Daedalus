@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 
 from .. import vocab as V
 from ..grid import Grid
+from .bridge import BridgePlan, BridgeRoute
 from .library import Library, Orientation, load
 from .netlist import Driver, Netlist, Sink
 
@@ -85,6 +86,8 @@ class Layout:
     net_cells: dict[int, set[Cell]] = field(default_factory=dict)
     #: Cells holding an inserted repeater, keyed by net.
     repeaters: dict[int, list[Cell]] = field(default_factory=dict)
+    #: Multilayer crossings carried by each net.
+    bridges: dict[int, list[BridgePlan]] = field(default_factory=dict)
 
     # -- placement helpers -------------------------------------------------
 
@@ -134,6 +137,61 @@ class Layout:
             if n != keep and self.is_free(n):
                 self.frozen.add(n)
 
+    def can_place_bridge(self, plan: BridgePlan, net: int) -> bool:
+        """Whether ``net`` can safely cross the wire beneath ``plan``."""
+        if not plan.in_bounds or plan.obstructions(self.grid):
+            return False
+
+        under = self.net_at(plan.crossing)
+        if under is None or under == net:
+            return False
+
+        # The lower net must pass straight across the bridge, perpendicular
+        # to its axis.  A bend or junction underneath would be roofed at its
+        # decision point and is too subtle to accept without simulation.
+        perpendicular = ((0, -1), (0, 1)) if plan.axis == "x" else ((-1, 0), (1, 0))
+        if any(self.net_at(_add(plan.crossing, step)) != under for step in perpendicular):
+            return False
+
+        for endpoint in (plan.entry, plan.exit):
+            if self.net_at(endpoint) != net and not self.can_hold_dust(endpoint, net):
+                return False
+
+        # Ramp blocks occupy y=1.  The cells under the high span stay empty
+        # so no later route can create a slope into the crossing structure.
+        for offset in (-2, -1, 1, 2):
+            cell = plan.cell(offset)
+            if not self.is_free(cell) or cell in self.frozen:
+                return False
+        return True
+
+    def place_bridge(self, plan: BridgePlan, net: int) -> None:
+        """Commit a validated crossing and reserve its planar footprint."""
+        if not self.can_place_bridge(plan, net):
+            raise RoutingFailure("bridge", f"net {net}: unsafe crossing at {plan.crossing}")
+
+        plan.place(self.grid)
+        for endpoint in (plan.entry, plan.exit):
+            if self.net_at(endpoint) != net:
+                self.place_dust(endpoint, net)
+
+        for offset in (-2, 2):
+            self.add_component("bridge_support", plan.cell(offset), V.SOLID, {net})
+        self.frozen.update((plan.cell(-1), plan.cell(1)))
+        self.bridges.setdefault(net, []).append(plan)
+
+    def bridge_candidates(self, net: int) -> list[BridgePlan]:
+        """Safe crossings over foreign dust, in deterministic order."""
+        plans = []
+        for cell, (kind, other) in self.occupied.items():
+            if kind != "dust" or other == net:
+                continue
+            for axis in ("x", "z"):
+                plan = BridgePlan(cell, axis)
+                if self.can_place_bridge(plan, net):
+                    plans.append(plan)
+        return sorted(plans, key=lambda plan: (*plan.crossing, plan.axis))
+
 
 # --------------------------------------------------------------------------
 # the synthesiser
@@ -148,6 +206,7 @@ class Stats:
     attempts: int = 0
     placed: int = 0
     routed: int = 0
+    bridged: int = 0
     failures: dict[str, int] = field(default_factory=dict)
 
     def note(self, stage: str) -> None:
@@ -158,6 +217,7 @@ class Stats:
             "attempts": self.attempts,
             "placed": self.placed,
             "routed": self.routed,
+            "bridged": self.bridged,
             "failures": dict(sorted(self.failures.items())),
         }
 
@@ -216,6 +276,10 @@ class Synthesiser:
     #: gate. Trial routing is the expensive part; past a handful of sites the
     #: problem is usually the previous gate's position, not this one's.
     SITE_TRIALS = 10
+    #: Crossing search is deliberately bounded. Two spans already consume ten
+    #: support blocks and twelve signal-strength hops; beyond that a fresh
+    #: placement is both cheaper and more likely to verify.
+    MAX_BRIDGES = 2
 
     def _place_and_route(self, g: int) -> None:
         gate = self.lib.inverter
@@ -266,6 +330,7 @@ class Synthesiser:
             set(lay.frozen),
             {k: set(v) for k, v in lay.net_cells.items()},
             {k: list(v) for k, v in lay.repeaters.items()},
+            {k: list(v) for k, v in lay.bridges.items()},
             dict(self.gate_at),
             dict(self.driver_comp),
             {k: set(v) for k, v in self.trees.items()},
@@ -280,6 +345,7 @@ class Synthesiser:
             frozen,
             net_cells,
             repeaters,
+            bridges,
             gate_at,
             driver_comp,
             trees,
@@ -292,6 +358,7 @@ class Synthesiser:
         lay.frozen = frozen
         lay.net_cells = net_cells
         lay.repeaters = repeaters
+        lay.bridges = bridges
         self.gate_at = gate_at
         self.driver_comp = driver_comp
         self.trees = trees
@@ -435,7 +502,7 @@ class Synthesiser:
         block = _add(anchor, orient.block)
         span = max(max_depth, 1)
         # Spread the depth levels across the usable columns.
-        target_x = 3 + (V.SX - 7) * depth / (span + 1)
+        target_x = 5 + (V.SX - 9) * depth / (span + 1)
         cost = 2.0 * abs(block[0] - target_x)
 
         in_net = self.net.nets[self.net.inverter_input[g]]
@@ -511,8 +578,14 @@ class Synthesiser:
 
     # -- routing -----------------------------------------------------------
 
-    def _components(self, cells: set[Cell]) -> list[set[Cell]]:
-        """Split a cell set into connected regions."""
+    def _components(
+        self, cells: set[Cell], bridges: list[BridgePlan] | tuple[BridgePlan, ...] = ()
+    ) -> list[set[Cell]]:
+        """Split cells into regions, treating bridges as virtual edges."""
+        bridge_neighbours: dict[Cell, Cell] = {}
+        for bridge in bridges:
+            bridge_neighbours[bridge.entry] = bridge.exit
+            bridge_neighbours[bridge.exit] = bridge.entry
         remaining = set(cells)
         out = []
         while remaining:
@@ -521,7 +594,10 @@ class Synthesiser:
             queue = deque([seed])
             while queue:
                 cur = queue.popleft()
-                for nb in neighbours(cur):
+                linked = list(neighbours(cur))
+                if cur in bridge_neighbours:
+                    linked.append(bridge_neighbours[cur])
+                for nb in linked:
                     if nb in remaining and nb not in comp:
                         comp.add(nb)
                         queue.append(nb)
@@ -541,15 +617,13 @@ class Synthesiser:
             raise RoutingFailure("routing", f"net {n}: driver {missing[0]} was never seeded")
 
         while True:
-            comps = self._components(tree)
+            comps = self._components(tree, self.layout.bridges.get(n, ()))
             if len(comps) <= 1:
                 return tree
             comps.sort(key=len, reverse=True)
             head = comps[0]
             for other in comps[1:]:
-                path = self._search(head, other, n)
-                if path is not None:
-                    self._commit_path(path, n, tree)
+                if self._connect(head, other, n, tree):
                     break
             else:
                 raise RoutingFailure("routing", f"net {n}: cannot join {len(comps)} fragments")
@@ -599,10 +673,8 @@ class Synthesiser:
                 return
             if not self.layout.can_hold_dust(target, n):
                 raise RoutingFailure("routing", f"net {n}: output {sink.idx} terminal is blocked")
-            path = self._search(tree, {target}, n)
-            if path is None:
+            if not self._connect(tree, {target}, n, tree):
                 raise RoutingFailure("routing", f"net {n}: cannot reach output {sink.idx}")
-            self._commit_path(path, n, tree)
             self.net_terminals.setdefault(n, []).append(target)
             return
 
@@ -647,12 +719,15 @@ class Synthesiser:
             if approach in tree:
                 path = [approach, face]
             else:
-                lead = self._search(
-                    tree, {approach}, n, forbid=lambda c, f=face: _adjacent(c, f)
-                )
-                if lead is None:
+                if not self._connect(
+                    tree,
+                    {approach},
+                    n,
+                    tree,
+                    forbid=lambda c, f=face: _adjacent(c, f),
+                ):
                     continue
-                path = lead + [face]
+                path = [approach, face]
             self._commit_path(path, n, tree)
             self.layout.freeze_around(face, keep=approach)
             self.net_terminals.setdefault(n, []).append(face)
@@ -714,6 +789,82 @@ class Synthesiser:
                     tick += 1
         return None
 
+    def _connect(
+        self,
+        start: set[Cell],
+        goal: set[Cell],
+        net: int,
+        tree: set[Cell],
+        forbid=None,
+    ) -> bool:
+        """Connect two regions, preferring planar wire over a bridge."""
+        path = self._search(start, goal, net, forbid=forbid)
+        if path is not None:
+            self._commit_path(path, net, tree)
+            return True
+        route = self._search_bridge(start, goal, net, forbid=forbid)
+        if route is None:
+            return False
+        self._commit_bridge_route(route, net, tree)
+        return True
+
+    def _search_bridge(
+        self,
+        start: set[Cell],
+        goal: set[Cell],
+        net: int,
+        forbid=None,
+    ) -> BridgeRoute | None:
+        """Find the shortest route that uses exactly one safe crossing."""
+        if sum(len(plans) for plans in self.layout.bridges.values()) >= self.MAX_BRIDGES:
+            return None
+        routes = []
+        for plan in self.layout.bridge_candidates(net):
+            for entry, exit in ((plan.entry, plan.exit), (plan.exit, plan.entry)):
+                footprint = plan.footprint
+
+                def bridge_forbid(cell, allowed, blocked=footprint, outer=forbid):
+                    return (cell in blocked and cell != allowed) or (
+                        outer is not None and outer(cell)
+                    )
+
+                lead = (
+                    [entry]
+                    if entry in start
+                    else self._search(
+                        start,
+                        {entry},
+                        net,
+                        forbid=lambda cell, allowed=entry: bridge_forbid(cell, allowed),
+                    )
+                )
+                if lead is None:
+                    continue
+                tail = (
+                    [exit]
+                    if exit in goal
+                    else self._search(
+                        {exit},
+                        goal,
+                        net,
+                        forbid=lambda cell, allowed=exit: bridge_forbid(cell, allowed),
+                    )
+                )
+                if tail is not None:
+                    routes.append(BridgeRoute(plan, tuple(lead), tuple(tail)))
+
+        if not routes:
+            return None
+        return min(
+            routes,
+            key=lambda route: (
+                route.wire_hops,
+                route.plan.crossing,
+                route.plan.axis,
+                route.lead,
+            ),
+        )
+
     def _commit_path(self, path: list[Cell], net: int, tree: set[Cell]) -> None:
         for cell in path:
             if cell in tree:
@@ -725,6 +876,13 @@ class Synthesiser:
                 raise RoutingFailure("routing", f"net {net}: cell {cell} became unusable")
             self.layout.place_dust(cell, net)
             tree.add(cell)
+
+    def _commit_bridge_route(self, route: BridgeRoute, net: int, tree: set[Cell]) -> None:
+        """Commit both planar legs and the elevated span between them."""
+        self._commit_path(list(route.lead), net, tree)
+        self.layout.place_bridge(route.plan, net)
+        tree.update((route.plan.entry, route.plan.exit))
+        self._commit_path(list(route.tail), net, tree)
 
     # -- signal strength ---------------------------------------------------
 
@@ -739,6 +897,10 @@ class Synthesiser:
         """
         dust = self.trees.get(net, set())
         reps = {c: f for c, f in self.layout.repeaters.get(net, ())}
+        bridge_edges: dict[Cell, tuple[Cell, int]] = {}
+        for bridge in self.layout.bridges.get(net, ()):
+            bridge_edges[bridge.entry] = (bridge.exit, bridge.wire_hops)
+            bridge_edges[bridge.exit] = (bridge.entry, bridge.wire_hops)
         dist: dict[Cell, int] = {}
         queue: deque[Cell] = deque()
         for s in starts:
@@ -750,6 +912,12 @@ class Synthesiser:
             k = dist[cur]
             if k > limit:
                 continue
+            if cur in bridge_edges:
+                other, hops = bridge_edges[cur]
+                bridge_cost = k + hops
+                if bridge_cost <= limit and dist.get(other, 1 << 30) > bridge_cost:
+                    dist[other] = bridge_cost
+                    queue.append(other)
             for nb in neighbours(cur):
                 if nb in dust:
                     if k + 1 <= limit and dist.get(nb, 1 << 30) > k + 1:
@@ -809,13 +977,26 @@ class Synthesiser:
                 )
         raise RoutingFailure("signal", f"net {net} still too long after four repeaters")
 
-    def _split(self, tree: set[Cell], cut: Cell, seed: Cell) -> set[Cell]:
+    def _split(
+        self,
+        tree: set[Cell],
+        cut: Cell,
+        seed: Cell,
+        bridges: list[BridgePlan] | tuple[BridgePlan, ...] = (),
+    ) -> set[Cell]:
         """The part of the tree still reachable from ``seed`` once ``cut`` goes."""
+        bridge_neighbours: dict[Cell, Cell] = {}
+        for bridge in bridges:
+            bridge_neighbours[bridge.entry] = bridge.exit
+            bridge_neighbours[bridge.exit] = bridge.entry
         seen = {seed}
         queue = deque([seed])
         while queue:
             cur = queue.popleft()
-            for nb in neighbours(cur):
+            linked = list(neighbours(cur))
+            if cur in bridge_neighbours:
+                linked.append(bridge_neighbours[cur])
+            for nb in linked:
                 if nb in tree and nb != cut and nb not in seen:
                     seen.add(nb)
                     queue.append(nb)
@@ -854,8 +1035,9 @@ class Synthesiser:
             ):
                 continue
 
-            side_a = self._split(tree, cell, links[0])
-            side_b = self._split(tree, cell, links[1])
+            bridges = self.layout.bridges.get(net, ())
+            side_a = self._split(tree, cell, links[0], bridges)
+            side_b = self._split(tree, cell, links[1], bridges)
             if side_a & side_b:
                 continue  # cutting here does not actually split the net
             if driver_cells <= side_a and needy & side_b:
@@ -907,6 +1089,11 @@ def _adjacent(a: Cell, b: Cell) -> bool:
     return _manhattan(a, b) == 1
 
 
-def synthesise(netlist: Netlist, placed_spec, rng: random.Random) -> Grid:
+def synthesise(
+    netlist: Netlist,
+    placed_spec,
+    rng: random.Random,
+    library: Library | None = None,
+) -> Grid:
     """Place and route once. Raises :class:`RoutingFailure` if it does not fit."""
-    return Synthesiser(netlist, placed_spec, rng).run()
+    return Synthesiser(netlist, placed_spec, rng, library=library).run()

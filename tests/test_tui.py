@@ -35,9 +35,19 @@ async def compile_in(pilot, source: str, attempts: str = "25") -> None:
     """Type a spec, press Compile, and wait for the worker to finish."""
     pilot.app.query_one("#source", TextArea).text = source
     pilot.app.query_one("#attempts", Input).value = attempts
-    await pilot.click("#run")
+    # Invoke the action directly so the worker is registered before the
+    # manager's completion snapshot. Pilot.click may return before a second
+    # Button.Pressed event is dispatched on Python 3.11/Windows.
+    pilot.app.action_compile()
     await pilot.app.workers.wait_for_complete()
-    await pilot.pause()
+    # Worker completion and its call_from_thread UI callbacks are separate
+    # events. Python 3.11 on Windows can observe the former first, so wait for
+    # the button state that _finish/_finish_error updates on the main thread.
+    for _ in range(20):
+        await pilot.pause()
+        if not pilot.app.query_one("#run", Button).disabled:
+            return
+    pytest.fail("compile worker finished without restoring the run button")
 
 
 class TestGoldenPath:
@@ -118,7 +128,7 @@ class TestFailurePaths:
             assert "no layout" in str(pilot.app.query_one("#grid", GridView).render())
 
     @pytest.mark.asyncio
-    async def test_a_known_gap_explains_itself(self):
+    async def test_a_routing_failure_explains_itself(self):
         async with DaedalusApp().run_test() as pilot:
             await compile_in(pilot, XOR, attempts="3")
             verdict = pilot.app.query_one("#verdict", Verdict).text

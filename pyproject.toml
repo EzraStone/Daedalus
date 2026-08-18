@@ -32,7 +32,13 @@ web = ["fastapi>=0.110", "uvicorn>=0.29", "websockets>=12"]
 # drift into disagreeing about what a circuit looks like.
 tui = ["textual>=0.60"]
 train = ["torch>=2.3", "numpy>=1.26"]
-dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.5",
+    "httpx>=0.27",
+    "httpx2>=2.0",
+]
 
 [project.scripts]
 daedalus = "daedalus.cli:main"
