@@ -66,9 +66,13 @@ class TestSequences:
 
 class TestLegality:
     def test_mask_covers_every_cell(self):
+        # One row per cell, each as wide as the model's head rather than as
+        # wide as the block vocabulary -- the mask is applied to logits over
+        # blocks *and* prefix tokens, and a row that stops at VOCAB_SIZE
+        # silently leaves the spec tokens unmasked.
         mask = legality_mask()
         assert len(mask) == V.CELLS
-        assert all(len(row) == V.VOCAB_SIZE for row in mask)
+        assert all(len(row) == TOTAL_VOCAB for row in mask)
 
     def test_control_tokens_are_never_legal(self):
         mask = legality_mask()

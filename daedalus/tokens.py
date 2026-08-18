@@ -144,6 +144,11 @@ def legality_mask() -> list[list[bool]]:
     states at sample time stops the model wasting probability mass on grids the
     verifier would reject before simulating them.
 
+    Rows are ``TOTAL_VOCAB`` wide, not ``V.VOCAB_SIZE`` — the model's head
+    spans blocks *and* prefix tokens, so the mask has to line up with it. The
+    prefix half is always false: a spec token in a grid cell is not a block,
+    and this is the only thing standing between the sampler and emitting one.
+
     This is the *position-only* part of legality — what a coordinate can decide
     on its own. Neighbour-dependent rules (dust needs support, a torch needs
     something to hang on) need the whole grid and belong in the sampler, which
@@ -152,7 +157,9 @@ def legality_mask() -> list[list[bool]]:
     mask = []
     for i in range(V.CELLS):
         _x, y, _z = V.unindex(i)
-        mask.append([V.legal_at(t, y) for t in range(V.VOCAB_SIZE)])
+        row = [V.legal_at(t, y) for t in range(V.VOCAB_SIZE)]
+        row.extend([False] * (TOTAL_VOCAB - V.VOCAB_SIZE))
+        mask.append(row)
     return mask
 
 

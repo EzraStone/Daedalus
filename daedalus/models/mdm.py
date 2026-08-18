@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from .. import vocab as V
 from ..tokens import TOTAL_VOCAB
-from .common import HAVE_TORCH, ModelConfig, require_torch
+from .common import HAVE_TORCH, ModelConfig, as_legality, require_torch
 
 #: The absorbing state, offset into the shared embedding table.
 MASK_ID = V.MASK
@@ -110,6 +110,7 @@ if HAVE_TORCH:
             device = prefix.device
             batch = prefix.shape[0]
             p = self.cfg.prefix_len
+            legality = as_legality(legality, device)
             body = torch.full((batch, V.CELLS), MASK_ID, dtype=torch.long, device=device)
 
             fixed = dict(pinned or {})

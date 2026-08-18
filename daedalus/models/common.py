@@ -40,6 +40,21 @@ def require_torch() -> None:
         )
 
 
+def as_legality(mask, device):
+    """Normalise the position-only legality mask into a bool tensor.
+
+    :mod:`daedalus.tokens` returns plain lists and stays free of torch — the
+    corpus, export and evaluation paths use it without a training install — so
+    the conversion happens here, once per sample call rather than once per
+    denoising step.
+    """
+    if mask is None:
+        return None
+    if torch.is_tensor(mask):
+        return mask.to(device=device, dtype=torch.bool)
+    return torch.tensor(mask, dtype=torch.bool, device=device)
+
+
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
     """The 25M-parameter body from §05.
@@ -177,7 +192,12 @@ if HAVE_TORCH:
         def embed(self, tokens, nl_embeddings=None):
             x = self.tok(tokens)
             body = x[:, self.cfg.prefix_len :]
-            x = torch.cat([x[:, : self.cfg.prefix_len], body + self.pos3d(self.cell_ids)], dim=1)
+            # Slice the position table to the body actually present. Training
+            # always passes a full grid, but autoregressive sampling grows the
+            # body one cell at a time and starts at zero, so a fixed-size table
+            # makes the first decode step a shape error.
+            grid_pos = self.pos3d(self.cell_ids[: body.shape[1]])
+            x = torch.cat([x[:, : self.cfg.prefix_len], body + grid_pos], dim=1)
             if nl_embeddings is not None:
                 # Splice projected sentence embeddings into their prefix slots.
                 slots = nl_embeddings.shape[1]

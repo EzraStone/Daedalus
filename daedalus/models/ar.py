@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .. import vocab as V
-from .common import HAVE_TORCH, ModelConfig, require_torch
+from .common import HAVE_TORCH, ModelConfig, as_legality, require_torch
 
 if HAVE_TORCH:
     import torch
@@ -70,6 +70,7 @@ if HAVE_TORCH:
             """
             device = prefix.device
             batch = prefix.shape[0]
+            legality = as_legality(legality, device)
             tokens = torch.cat(
                 [prefix, torch.zeros(batch, V.CELLS, dtype=torch.long, device=device)], dim=1
             )
