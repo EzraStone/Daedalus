@@ -114,6 +114,123 @@ def cmd_baselines(args) -> int:
     return 0
 
 
+def _need_torch() -> bool:
+    from .models import HAVE_TORCH
+
+    if not HAVE_TORCH:
+        print(
+            "this needs PyTorch:\n  pip install 'daedalus[train]'\n"
+            "For the RX 7600 see docs/hardware.md.",
+            file=sys.stderr,
+        )
+    return HAVE_TORCH
+
+
+def cmd_train(args) -> int:
+    """Pretrain a generator on a procedural corpus."""
+    if not _need_torch():
+        return 2
+    from .data.corpus import load
+    from .models import AutoregressiveModel, MaskedDiffusionModel, ModelConfig
+    from .train import TrainConfig, evaluate, train
+
+    data = Path(args.corpus)
+    train_set = load(data / "train.jsonl" if data.is_dir() else data)
+    val_set = []
+    if data.is_dir() and (data / "val.jsonl").exists():
+        val_set = load(data / "val.jsonl")
+    if not train_set:
+        print(f"no examples in {data}", file=sys.stderr)
+        return 1
+
+    cls = AutoregressiveModel if args.model == "ar" else MaskedDiffusionModel
+    cfg = ModelConfig()
+    if args.tiny:
+        # Enough to prove the wiring on a laptop without an accelerator.
+        cfg = ModelConfig(n_layers=2, d_model=128, n_heads=4, d_ff=256)
+    model = cls(cfg)
+
+    print(f"{args.model} · {model.body.n_parameters():,} parameters")
+    print(f"{len(train_set)} training examples, {len(val_set)} validation")
+    history = train(
+        model,
+        train_set,
+        TrainConfig(
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            seed=args.seed,
+            device=args.device,
+        ),
+        out_dir=args.out,
+        val=val_set or None,
+    )
+    for entry in history:
+        line = f"  step {entry['step']:>5}  loss {entry['loss']:.4f}"
+        if "val_loss" in entry:
+            line += f"  val {entry['val_loss']:.4f}"
+        print(line)
+    if val_set:
+        # The comparable number. Training loss is not one for the diffusion
+        # model -- see daedalus.train.evaluate.
+        print(f"\nfinal validation loss: {evaluate(model, val_set, seed=args.seed):.4f}")
+    if args.out:
+        print(f"wrote {Path(args.out) / 'model.pt'}")
+    return 0
+
+
+def cmd_sample(args) -> int:
+    """Generate candidate grids from a checkpoint and verify every one."""
+    if not _need_torch():
+        return 2
+    import torch
+
+    from . import tokens as T
+    from .eval import grade
+    from .grid import Grid
+    from .train import load_checkpoint
+
+    spec = _read_spec(args.spec)
+    placed = spec.default_placement(random.Random(args.seed))
+    model = load_checkpoint(args.checkpoint, device=args.device)
+    model.eval()
+
+    torch.manual_seed(args.seed)
+    prefix, _slots = T.spec_prefix(placed)
+    device = next(model.parameters()).device
+    batch = torch.tensor([prefix] * args.k, dtype=torch.long, device=device)
+    kwargs = {"steps": args.steps} if hasattr(model, "loss_at") else {}
+    bodies = model.sample(
+        batch,
+        legality=T.legality_mask(),
+        pinned=T.port_mask(placed),
+        **kwargs,
+    )
+    candidates = [row.tolist() for row in bodies.cpu()]
+
+    with Verifier() as v:
+        result = grade(candidates, placed, v)
+        verdicts = [v.evaluate(Grid.from_tokens(c), placed) for c in candidates]
+
+    print(spec.source())
+    print()
+    for i, verdict in enumerate(verdicts):
+        print(f"  {i:>2}  {verdict}")
+    passed = [c for c, verdict in zip(candidates, verdicts) if verdict.is_pass()]
+    print(f"\n{len(passed)}/{args.k} verified")
+    if passed and args.out:
+        from .schematic import write_litematic, write_schem
+
+        out = Path(args.out)
+        writer = write_litematic if out.suffix == ".litematic" else write_schem
+        writer(Grid.from_tokens(passed[0]), out)
+        print(f"wrote {out}")
+    if passed:
+        print(Grid.from_tokens(passed[0]).render())
+    del result
+    return 0 if passed else 1
+
+
 def _module_present(name: str) -> bool:
     import importlib.util
 
@@ -230,6 +347,28 @@ def main(argv=None) -> int:
     p.add_argument("--attempts", type=int, default=15)
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_baselines)
+
+    p = sub.add_parser("train", help="pretrain a generator on a corpus")
+    p.add_argument("corpus", help="corpus directory, or a single .jsonl file")
+    p.add_argument("--model", choices=("mdm", "ar"), default="mdm")
+    p.add_argument("--out", help="write model.pt and history.json here")
+    p.add_argument("--epochs", type=int, default=1)
+    p.add_argument("--batch-size", type=int, default=24)
+    p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--device", default="auto", help="auto, cpu, cuda, ...")
+    p.add_argument("--tiny", action="store_true", help="small config for a CPU wiring check")
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(func=cmd_train)
+
+    p = sub.add_parser("sample", help="generate from a checkpoint, and verify the result")
+    p.add_argument("checkpoint", help="a model.pt written by `daedalus train`")
+    p.add_argument("spec", help="spec source, or a path to a file containing one")
+    p.add_argument("--out", help="write the first verified sample here")
+    p.add_argument("-k", type=int, default=8, help="candidates to draw")
+    p.add_argument("--steps", type=int, default=24, help="denoising steps (diffusion only)")
+    p.add_argument("--device", default="auto")
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(func=cmd_sample)
 
     p = sub.add_parser("serve", help="open the local web window")
     # Loopback by default: there is no auth here, and there should not be.
