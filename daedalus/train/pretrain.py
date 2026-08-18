@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .. import vocab as V
@@ -66,13 +66,104 @@ def to_sequences(examples: list[Example]):
     return out
 
 
+#: Mask rates the fixed-ratio evaluation sweeps. Spread across the range so
+#: the number reflects both nearly-clean and nearly-empty grids.
+EVAL_RATIOS = (0.1, 0.3, 0.5, 0.7, 0.9)
+
+
+def evaluate(model, examples: list[Example], seed: int = 0, batch_size: int = 16) -> float:
+    """Mean loss on ``examples`` under conditions that do not move.
+
+    Training loss is not comparable across steps for the diffusion model: the
+    mask rate is drawn per batch and the objective is scaled by ``1/t``, so an
+    unchanged model reports wildly different numbers. This pins the mask rate
+    to a fixed sweep and the corruption to a fixed seed, which is what makes
+    two evaluations of two checkpoints mean anything next to each other.
+
+    The autoregressive model has no such knob -- teacher forcing is already
+    deterministic -- so it is scored once per batch.
+    """
+    require_torch()
+    import torch
+
+    if not examples:
+        raise ValueError("nothing to evaluate on")
+
+    device = next(model.parameters()).device
+    sequences = to_sequences(examples)
+    ratios = EVAL_RATIOS if hasattr(model, "loss_at") else (None,)
+    was_training = model.training
+    model.eval()
+    total, batches = 0.0, 0
+    with torch.no_grad():
+        for start in range(0, len(sequences), batch_size):
+            chunk = sequences[start : start + batch_size]
+            if not chunk:
+                continue
+            tokens = torch.tensor(chunk, dtype=torch.long, device=device)
+            for ratio in ratios:
+                torch.manual_seed(seed)
+                loss = model.loss(tokens) if ratio is None else model.loss_at(tokens, ratio)
+                total += float(loss)
+                batches += 1
+    model.train(was_training)
+    return total / max(batches, 1)
+
+
+def save_checkpoint(model, path: str | Path) -> Path:
+    """Write weights, config and model kind so the run can be reloaded.
+
+    The kind matters: the two models share a body and differ only in mask and
+    objective, so a bare state dict does not say which one produced it.
+    """
+    require_torch()
+    import torch
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "kind": type(model).__name__,
+            "config": asdict(model.cfg),
+            "model": model.state_dict(),
+        },
+        path,
+    )
+    return path
+
+
+def load_checkpoint(path: str | Path, device: str = "auto"):
+    """Rebuild the model a checkpoint came from, weights and all."""
+    require_torch()
+    import torch
+
+    from ..models import AutoregressiveModel, MaskedDiffusionModel
+
+    blob = torch.load(Path(path), map_location="cpu", weights_only=False)
+    kinds = {
+        "AutoregressiveModel": AutoregressiveModel,
+        "MaskedDiffusionModel": MaskedDiffusionModel,
+    }
+    kind = blob.get("kind")
+    if kind not in kinds:
+        raise ValueError(f"checkpoint does not name a known model: {kind!r}")
+    model = kinds[kind](ModelConfig(**blob["config"]))
+    model.load_state_dict(blob["model"])
+    return model.to(pick_device(device))
+
+
 def train(
     model,
     examples: list[Example],
     cfg: TrainConfig = TrainConfig(),
     out_dir: str | Path | None = None,
+    val: list[Example] | None = None,
 ):
-    """Fit ``model`` on ``examples``. Returns the loss history."""
+    """Fit ``model`` on ``examples``. Returns the loss history.
+
+    Pass ``val`` to get a ``val_loss`` alongside each logged step. For the
+    diffusion model that is the only column of the history worth plotting.
+    """
     require_torch()
     import torch
 
@@ -111,12 +202,15 @@ def train(
             opt.step()
             step += 1
             if step % cfg.log_every == 0 or step == total:
-                history.append({"step": step, "epoch": epoch, "loss": float(loss.item())})
+                entry = {"step": step, "epoch": epoch, "loss": float(loss.item())}
+                if val:
+                    entry["val_loss"] = evaluate(model, val, seed=cfg.seed)
+                history.append(entry)
 
     if out_dir:
         path = Path(out_dir)
         path.mkdir(parents=True, exist_ok=True)
-        torch.save({"model": model.state_dict(), "config": model.cfg.__dict__}, path / "model.pt")
+        save_checkpoint(model, path / "model.pt")
         (path / "history.json").write_text(
             json.dumps({"seconds": time.time() - started, "history": history}, indent=2)
         )

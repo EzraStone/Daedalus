@@ -58,6 +58,18 @@ if HAVE_TORCH:
             return torch.where(masked, torch.full_like(body, MASK_ID), body), masked
 
         def loss(self, tokens, weights=None, nl_embeddings=None, eps: float = 1e-3):
+            """Training objective: a mask rate drawn fresh for every batch.
+
+            Because ``t`` is random and the result is scaled by ``1/t``, the
+            number this returns swings by orders of magnitude from batch to
+            batch on an unchanged model. It is the right thing to descend and
+            the wrong thing to plot -- use :func:`daedalus.train.evaluate` for
+            a figure that means something across steps.
+            """
+            t = torch.rand(tokens.shape[0], device=tokens.device).clamp_(eps, 1.0)
+            return self.loss_at(tokens, t, weights, nl_embeddings)
+
+        def loss_at(self, tokens, t, weights=None, nl_embeddings=None):
             """Cross-entropy on masked positions only, weighted by ``1/t``.
 
             The ``1/t`` weight is what makes this a bound on the likelihood
@@ -67,7 +79,8 @@ if HAVE_TORCH:
             """
             p = self.cfg.prefix_len
             prefix, body = tokens[:, :p], tokens[:, p:]
-            t = torch.rand(body.shape[0], device=body.device).clamp_(eps, 1.0)
+            if not torch.is_tensor(t):
+                t = torch.full((body.shape[0],), float(t), device=body.device)
             noisy, masked = self.corrupt(body, t)
             logits = self(torch.cat([prefix, noisy], dim=1), nl_embeddings)[:, p:]
 
