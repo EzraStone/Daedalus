@@ -1,5 +1,6 @@
 # Everything depends on the verifier, so it builds first.
-.PHONY: all verifier test test-rust test-python lint selftest web tui corpus baselines clean
+.PHONY: all verifier test test-rust test-python lint selftest web tui corpus baselines \
+        bench train sample loop repair agreement clean
 
 all: verifier
 
@@ -18,7 +19,10 @@ test-python: verifier
 lint:
 	cargo clippy --all-targets -- -D warnings
 	cargo fmt --check
-	ruff check daedalus tests || true
+	# No `|| true`. A lint target that cannot fail is not a lint target, and
+	# CI runs the real thing anyway -- so this only ever hid a local failure
+	# until the push.
+	ruff check .
 
 selftest: verifier
 	./target/release/redsim selftest
@@ -37,6 +41,27 @@ corpus: verifier
 
 baselines: verifier
 	python3 -m daedalus baselines --specs 25
+
+# Verifier throughput. The figure the whole approach rests on, measured
+# rather than asserted -- see docs/benchmarks.md.
+bench: verifier
+	python3 -m daedalus bench --batch 64
+
+# Needs the training extra: pip install -e ".[train]"
+train: verifier
+	python3 -m daedalus train data/ --out runs/first
+
+sample: verifier
+	python3 -m daedalus sample runs/first/model.pt specs/nand.txt -k 8
+
+# Damage a working circuit and have the model rebuild it. The operation
+# masked diffusion exists for.
+repair: verifier
+	python3 -m daedalus repair runs/first/model.pt specs/nand.txt
+
+# The section 06 rounds: sample, verify, keep what passes, retrain.
+loop: verifier
+	python3 -m daedalus loop runs/first/model.pt --corpus data/ --rounds 5
 
 # The number that makes everything else believable. Needs a Fabric server;
 # see harness/README.md.
