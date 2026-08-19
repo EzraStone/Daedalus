@@ -38,7 +38,7 @@ from .. import __version__
 from .. import vocab as V
 from ..grid import Grid
 from ..redsim import Verifier, VerifierError
-from ..render import LEGEND
+from ..render import LEGEND, occupied_layers
 from ..render import palette as display_palette
 from ..schematic import block_summary, write_litematic, write_schem
 from ..spec import PlacedSpec, Spec, SpecSyntaxError
@@ -164,6 +164,9 @@ def _attempt_payload(n: int, attempt: Attempt) -> dict:
     payload: dict = {"n": n, "stage": attempt.stage, "detail": attempt.detail, "ok": attempt.ok}
     if attempt.grid is not None:
         payload["tokens"] = attempt.grid.tokens()
+        # A bridge puts dust on y=2 and y=3. Drawing only the logic layer hides
+        # it completely, so the run reads as a circuit with a gap in it.
+        payload["layers"] = occupied_layers(payload["tokens"])
     if attempt.verdict is not None:
         payload["verdict"] = str(attempt.verdict)
         payload["verdict_kind"] = attempt.verdict.kind

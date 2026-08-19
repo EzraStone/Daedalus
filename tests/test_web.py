@@ -298,3 +298,33 @@ class TestSharedVerifier:
         for t in threads:
             t.join()
         assert not errors, errors
+
+
+class TestLayers:
+    """A crossing bridge lives above the logic layer, so one slice is not enough."""
+
+    def test_a_compile_reports_which_layers_are_occupied(self, client):
+        response = client.post(
+            "/api/compile",
+            json={"spec_source": "inputs A B\noutputs Q\nQ = !(A & B)", "attempts": 30},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        attempt = body["attempts"][-1]
+        assert attempt["ok"], body
+        # Substrate and logic at minimum; a bridged layout adds y=2 and y=3.
+        assert V.SUBSTRATE_Y in attempt["layers"]
+        assert V.LOGIC_Y in attempt["layers"]
+
+    def test_layers_are_only_the_ones_with_something_in_them(self, client):
+        response = client.post(
+            "/api/compile",
+            json={"spec_source": "inputs A B\noutputs Q\nQ = !(A & B)", "attempts": 30},
+        )
+        attempt = response.json()["attempts"][-1]
+        tokens = attempt["tokens"]
+        for y in range(V.SY):
+            has = any(
+                tokens[V.index(x, y, z)] != V.AIR for z in range(V.SZ) for x in range(V.SX)
+            )
+            assert (y in attempt["layers"]) == has, y

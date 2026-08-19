@@ -114,12 +114,13 @@ class GridView(Static):
     """
 
     tokens: reactive[list[int] | None] = reactive(None, layout=True)
+    y: reactive[int] = reactive(V.LOGIC_Y, layout=True)
 
     def render(self) -> Text:
         if not self.tokens:
             return Text("no layout — nothing was routed for this spec", style="dim")
         out = Text()
-        for row in render.layer(self.tokens, V.LOGIC_Y):
+        for row in render.layer(self.tokens, self.y):
             for cell in row:
                 out.append(
                     f"{cell.glyph} ", style=f"{cell.foreground} on {cell.background}"
@@ -220,6 +221,10 @@ class DaedalusApp(App):
     BINDINGS = [
         ("ctrl+r", "compile", "Compile"),
         ("ctrl+e", "export", "Export .schem"),
+        # Bridges put dust two and three layers up, so a circuit that uses one
+        # is not visible at all from the logic layer alone.
+        ("[", "layer_down", "Layer -"),
+        ("]", "layer_up", "Layer +"),
         ("ctrl+q", "quit", "Quit"),
     ]
 
@@ -256,7 +261,7 @@ class DaedalusApp(App):
                 yield RichLog(id="log", wrap=True, markup=True)
             with VerticalScroll(id="right"):
                 yield Verdict("idle", id="verdict")
-                yield Label("LAYOUT · LOGIC LAYER (y=1)", classes="caption")
+                yield Label("LAYOUT", id="layer-caption", classes="caption")
                 yield GridView(id="grid")
                 yield Legend(id="legend")
                 yield Detail(id="detail")
@@ -293,6 +298,37 @@ class DaedalusApp(App):
             self._verifier.start()
         return self._verifier
 
+    def layers(self) -> list[int]:
+        """Layers worth showing: the ones with anything in them."""
+        if not self.result.tokens:
+            return [V.LOGIC_Y]
+        return render.occupied_layers(self.result.tokens) or [V.LOGIC_Y]
+
+    def show_layer(self, y: int) -> None:
+        grid = self.query_one("#grid", GridView)
+        grid.y = y
+        occupied = self.layers()
+        where = f"{occupied.index(y) + 1} of {len(occupied)}" if y in occupied else "empty"
+        name = {V.SUBSTRATE_Y: "substrate", V.LOGIC_Y: "logic"}.get(y, "elevated")
+        self.query_one("#layer-caption", Label).update(
+            f"LAYOUT · {name.upper()} LAYER (y={y}) · {where} · [ ]"
+        )
+
+    def _step_layer(self, delta: int) -> None:
+        occupied = self.layers()
+        current = self.query_one("#grid", GridView).y
+        # Step through occupied layers rather than all six: with a bridge in
+        # play the interesting ones are y=1, 2 and 3, and paging through empty
+        # layers to find them reads as the view being broken.
+        i = occupied.index(current) if current in occupied else 0
+        self.show_layer(occupied[max(0, min(i + delta, len(occupied) - 1))])
+
+    def action_layer_up(self) -> None:
+        self._step_layer(1)
+
+    def action_layer_down(self) -> None:
+        self._step_layer(-1)
+
     def clear_result(self) -> None:
         """Wipe the previous run.
 
@@ -301,6 +337,7 @@ class DaedalusApp(App):
         """
         self.result = Result()
         self.query_one("#grid", GridView).tokens = None
+        self.show_layer(V.LOGIC_Y)
         detail = self.query_one("#detail", Detail)
         detail.spec_text = ""
         detail.materials = ""
@@ -389,6 +426,7 @@ class DaedalusApp(App):
             self.log_line("ok", "verified", str(attempt.verdict), n)
             self.result = Result(attempt.grid.tokens(), str(attempt.verdict), True)
             self.query_one("#grid", GridView).tokens = self.result.tokens
+            self.show_layer(V.LOGIC_Y)
             self.query_one("#verdict", Verdict).show(
                 "pass", str(attempt.verdict), f"attempt {n}"
             )

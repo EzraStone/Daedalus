@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("textual", reason="the terminal window is an optional extra")
 
-from textual.widgets import Button, Input, RichLog, TextArea  # noqa: E402
+from textual.widgets import Button, Input, Label, RichLog, TextArea  # noqa: E402
 
 from daedalus import render  # noqa: E402
 from daedalus import vocab as V  # noqa: E402
@@ -224,3 +224,47 @@ class TestSharedRendering:
         assert render.occupied_layers(tokens) == []
         tokens[V.index(3, 2, 3)] = V.WIRE
         assert render.occupied_layers(tokens) == [2]
+
+
+class TestLayers:
+    """Bridges put dust on y=2 and y=3, which the logic layer alone cannot show."""
+
+    @pytest.mark.asyncio
+    async def test_the_logic_layer_is_where_a_run_starts(self):
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, NAND)
+            assert pilot.app.query_one("#grid", GridView).y == V.LOGIC_Y
+
+    @pytest.mark.asyncio
+    async def test_stepping_moves_between_occupied_layers_only(self):
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, NAND)
+            occupied = pilot.app.layers()
+            assert V.SUBSTRATE_Y in occupied and V.LOGIC_Y in occupied
+
+            await pilot.press("[")
+            assert pilot.app.query_one("#grid", GridView).y == occupied[0]
+            # Already at the bottom: stepping down again must not wrap or crash.
+            await pilot.press("[")
+            assert pilot.app.query_one("#grid", GridView).y == occupied[0]
+
+            for _ in range(len(occupied) + 2):
+                await pilot.press("]")
+            assert pilot.app.query_one("#grid", GridView).y == occupied[-1]
+
+    @pytest.mark.asyncio
+    async def test_the_caption_names_the_layer_on_screen(self):
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, NAND)
+            caption = pilot.app.query_one("#layer-caption", Label)
+            assert "LOGIC LAYER (y=1)" in str(caption.render())
+            await pilot.press("[")
+            assert "SUBSTRATE LAYER (y=0)" in str(caption.render())
+
+    @pytest.mark.asyncio
+    async def test_a_failed_run_goes_back_to_the_logic_layer(self):
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, NAND)
+            await pilot.press("[")
+            await compile_in(pilot, "inputs A\noutputs Q\nQ = @")
+            assert pilot.app.query_one("#grid", GridView).y == V.LOGIC_Y

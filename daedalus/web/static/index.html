@@ -144,6 +144,10 @@ dl div{display:flex;justify-content:space-between;gap:1rem;padding:.12rem 0}
 dt{color:var(--ink-dim)}
 dd{margin:0;color:var(--ink)}
 
+.layers{display:flex;gap:.35rem;margin:.1rem 0 .6rem}
+.layers button{font-family:var(--mono);font-size:.68rem;padding:.2rem .55rem;border-radius:3px;
+  border:1px solid var(--rule);background:transparent;color:var(--ink-dim);cursor:pointer}
+.layers button[aria-pressed="true"]{border-color:var(--accent);color:var(--ink)}
 .legend{display:flex;flex-wrap:wrap;gap:.5rem 1rem;margin-top:.7rem;font-family:var(--mono);font-size:.68rem;color:var(--ink-dim)}
 .legend span{display:flex;align-items:center;gap:.3rem}
 .legend i{width:12px;height:12px;border-radius:2px;display:block}
@@ -204,7 +208,8 @@ Q = !(A &amp; B)</textarea>
     <div id="verdict">idle<small>load an example or write a spec, then press Compile</small></div>
 
     <div id="results" hidden>
-      <div class="eyebrow">Layout · logic layer (y=1)</div>
+      <div class="eyebrow" id="layer-caption">Layout · logic layer (y=1)</div>
+      <div class="layers" id="layers"></div>
       <div class="grid-wrap"><div id="grid"></div></div>
       <div id="no-grid" class="empty" hidden>No layout — nothing was routed for this spec.</div>
       <div class="legend" id="legend"></div>
@@ -248,12 +253,13 @@ const els = {
   empty: $("empty"), grid: $("grid"), legend: $("legend"), table: $("table"),
   canonical: $("canonical"), measurements: $("measurements"), materials: $("materials"),
   schem: $("export-schem"), litematic: $("export-litematic"), health: $("health"),
-  noGrid: $("no-grid"),
+  noGrid: $("no-grid"), layers: $("layers"), layerCaption: $("layer-caption"),
 };
 
 let palette = null;      // token id -> {kind, glyph, state}
 let geometry = null;
 let lastTokens = null;   // the grid of the most recent PASS
+let lastLayers = null;   // which y layers that grid actually uses
 let socket = null;
 
 // Glyphs and the legend come from the server (daedalus/render.py), so the
@@ -305,10 +311,11 @@ function renderDl(target, pairs) {
   }
 }
 
-/** Draw the logic layer. The grid is y-z-x, so one layer is a contiguous slice. */
-function renderGrid(tokens) {
+/** Draw one layer. The grid is y-z-x, so a layer is a contiguous slice. */
+function renderGrid(tokens, layer) {
   if (!palette || !geometry) return;
-  const { sx, sz, logic_y: y } = geometry;
+  const { sx, sz } = geometry;
+  const y = layer === undefined ? geometry.logic_y : layer;
   els.grid.style.gridTemplateColumns = `repeat(${sx}, 22px)`;
   els.grid.replaceChildren();
   for (let z = 0; z < sz; z++) {
@@ -358,15 +365,45 @@ function showSpec(spec) {
  */
 function clearResult() {
   lastTokens = null;
+  lastLayers = null;
+  els.layers.replaceChildren();
   els.grid.replaceChildren();
   els.materials.replaceChildren();
   els.noGrid.hidden = true;
   els.schem.disabled = els.litematic.disabled = true;
 }
 
+/**
+ * Draw one layer and rebuild the picker.
+ *
+ * Only occupied layers get a button. A crossing bridge lives on y=2 and y=3,
+ * so a layout that uses one is partly invisible from the logic layer alone —
+ * the dust simply stops and starts again with nothing in between.
+ */
+function showLayer(y) {
+  if (!lastTokens) return;
+  const occupied = lastLayers && lastLayers.length ? lastLayers : [y];
+  if (!occupied.includes(y)) y = occupied.includes(geometry.logic_y) ? geometry.logic_y : occupied[0];
+  renderGrid(lastTokens, y);
+
+  const name = y === 0 ? "substrate" : y === geometry.logic_y ? "logic" : "elevated";
+  els.layerCaption.textContent = `Layout · ${name} layer (y=${y})`;
+  els.layers.replaceChildren();
+  if (occupied.length < 2) return;
+  for (const candidate of occupied) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `y=${candidate}`;
+    button.setAttribute("aria-pressed", String(candidate === y));
+    button.addEventListener("click", () => showLayer(candidate));
+    els.layers.appendChild(button);
+  }
+}
+
 function showResult(attempt) {
   lastTokens = attempt.tokens || null;
-  if (lastTokens) renderGrid(lastTokens);
+  lastLayers = attempt.layers || null;
+  if (lastTokens) showLayer(geometry ? geometry.logic_y : 1);
   els.noGrid.hidden = Boolean(lastTokens);
   els.results.hidden = false;
   els.empty.hidden = true;
