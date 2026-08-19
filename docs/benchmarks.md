@@ -63,38 +63,45 @@ the verifier passes it. The discard rate is reported rather than hidden,
 because it is the honest cost of a procedural compiler that does not always
 succeed.
 
-### An open regression
+### The headline yield number fell, and it is not a regression
 
-Same command, same scale, same seed, before and after crossbar bridges:
+`daedalus corpus /tmp/out --scale 0.05`, seed 0, before and after crossbar
+bridges:
 
 | | attempts | routed | bridged | yield |
 |---|---|---|---|---|
 | `dd18606` (planar only) | 704 | 59 | — | **8.4%** |
-| current (with bridges) | 2046 | 31 | 5 | **1.5%** |
+| current | 2046 | 31 | 5 | **1.5%** |
 
-```
-$ daedalus corpus /tmp/out --scale 0.05
-```
+That looks like a 5.6× regression and is not one. The bridge work also flipped
+`ROUTABLE_GATES` from `("and", "or")` to include XOR — the exclusion existed
+precisely *because* a planar router cannot build one — so the two rows are not
+sampling the same workload. The second is being asked much harder questions.
 
-Bridges unlocked XOR and multiplexers, which planar routing simply could not
-build. They also cost roughly 5.6× in corpus yield, and only 5 of the 31
-surviving layouts actually used one. Failures are dominated by routing (1829
-of 2046) with a new `ports` category (60) that did not exist before.
+Holding the gate set fixed and varying only the code separates them:
 
-**This is not diagnosed.** One hypothesis has been tested and ruled out: the
-gate-spreading change in `fc93095` moved the placement cost target from
-`3 + (SX-7)` to `5 + (SX-9)`, which looked like the obvious suspect. Reverting
-just that line changes nothing —
+| code | gate set | attempts | routed | yield |
+|---|---|---|---|---|
+| `dd18606` | and/or | 704 | 59 | 8.4% |
+| current | and/or | 664 | 59 | **8.9%** |
+| current | and/or/xor | 2046 | 31 | 1.5% |
 
-| `target_x` | attempts | routed | yield |
-|---|---|---|---|
-| `5 + (SX-9)` (current) | 2046 | 31 | 1.52% |
-| `3 + (SX-7)` (reverted) | 2030 | 30 | 1.48% |
+The router did not get worse; on the workload the old one could handle it got
+slightly better. What changed is that the corpus now contains a class of spec
+that used to be filtered out of it, and those specs are expensive: a crossing
+costs a seven-cell span and is capped at two per layout.
 
-— so the cause is elsewhere in the ~230 lines the bridge work changed in
-`place.py`. Worth finding: at 1.5% yield a corpus build does about six times
-the work for the same number of examples, and the loop's spec throughput is
-bounded by the same code.
+Two things follow. Yield is now a property of the spec mix and cannot be
+compared across changes to `ROUTABLE_GATES`. And the honest cost of XOR
+coverage is that a corpus build does several times the work per example —
+worth it for coverage of a function class that was previously impossible,
+but worth knowing before budgeting a large build.
+
+An earlier version of this file recorded the 8.4% → 1.5% drop as an
+undiagnosed regression, and separately ruled out the gate-spreading change in
+`fc93095` as its cause (reverting that line alone gives 1.48% against 1.52%,
+and an intermediate value 1.49%). That ruling-out stands; the regression
+framing does not.
 
 ## What is not measured
 

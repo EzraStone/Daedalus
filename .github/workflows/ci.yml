@@ -49,3 +49,41 @@ jobs:
 
       - name: Lint the Python package
         run: python -m ruff check .
+
+  generators:
+    # The model tests skip themselves without torch, so the matrix above runs
+    # green while roughly forty of them never execute -- which is exactly how
+    # the generators reached this repository with three live bugs in code that
+    # imported cleanly. One job, CPU wheels, so the cost is one download rather
+    # than four.
+    name: generators (CPU torch)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Select stable Rust
+        run: rustup default stable
+
+      - name: Install with the training extra
+        run: |
+          python -m pip install --disable-pip-version-check \
+            torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --disable-pip-version-check -e ".[dev]"
+
+      - name: Build the release verifier
+        run: cargo build --release -p redsim
+
+      - name: Test the generators, training and the loop adapters
+        run: |
+          python -m pytest tests/test_models.py tests/test_train.py \
+            tests/test_adapters.py tests/test_cli.py -q
+
+      - name: Fail if torch was missing and the tests skipped
+        run: python -c "import torch; print('torch', torch.__version__)"
