@@ -33,6 +33,29 @@ governs how long a round takes.
 A round of 20,000 specs at 64 candidates is 1.28M evaluations, or about a
 minute of verification.
 
+## Baselines
+
+`daedalus baselines --specs 20 --k 8 --attempts 12`, seed 0. Three of the four
+methods from §07; the prompted-LLM baseline needs an API key and has not been
+run.
+
+| method | pass@1 | pass@8 | diversity | malformed |
+|---|---|---|---|---|
+| procedural compiler | 0.250 | 0.250 | 4.00 | 0.000 |
+| retrieval | 0.250 | 0.250 | 1.00 | 0.000 |
+| unconditional | 0.000 | 0.000 | 0.00 | 0.969 |
+
+The unconditional row is the floor and it is worth looking at: 97% of random
+grids are malformed, so a model that learns nothing but "what a well-formed
+circuit looks like" already clears a bar. That is why the sampler's legality
+and support constraints matter — they hand that floor to the model for free,
+and the interesting question starts above it.
+
+The compiler and retrieval tying at 0.250 is not a coincidence: retrieval is
+searching a corpus the compiler built, so it inherits the compiler's coverage.
+Diversity separates them — the compiler finds 4 distinct layouts per solved
+spec, retrieval finds 1 by construction.
+
 ## Corpus yield
 
 `daedalus corpus` samples a spec, synthesises a layout, and keeps it only if
@@ -40,16 +63,38 @@ the verifier passes it. The discard rate is reported rather than hidden,
 because it is the honest cost of a procedural compiler that does not always
 succeed.
 
-At `--scale 0.05`, before crossbar bridges landed:
+### An open regression
+
+Same command, same scale, same seed, before and after crossbar bridges:
+
+| | attempts | routed | bridged | yield |
+|---|---|---|---|---|
+| `dd18606` (planar only) | 704 | 59 | — | **8.4%** |
+| current (with bridges) | 2046 | 31 | 5 | **1.5%** |
 
 ```
-attempts 704 · placed 59 · routed 59
-failures: routing 606, placement 25, signal 14
+$ daedalus corpus /tmp/out --scale 0.05
 ```
 
-An 8% yield, dominated by routing. That is what motivated bridges: a planar
-router cannot build a netlist that needs a wire crossing, and a large fraction
-of randomly sampled specs need one.
+Bridges unlocked XOR and multiplexers, which planar routing simply could not
+build. They also cost roughly 5.6× in corpus yield, and only 5 of the 31
+surviving layouts actually used one. Failures are dominated by routing (1829
+of 2046) with a new `ports` category (60) that did not exist before.
+
+**This is not diagnosed.** One hypothesis has been tested and ruled out: the
+gate-spreading change in `fc93095` moved the placement cost target from
+`3 + (SX-7)` to `5 + (SX-9)`, which looked like the obvious suspect. Reverting
+just that line changes nothing —
+
+| `target_x` | attempts | routed | yield |
+|---|---|---|---|
+| `5 + (SX-9)` (current) | 2046 | 31 | 1.52% |
+| `3 + (SX-7)` (reverted) | 2030 | 30 | 1.48% |
+
+— so the cause is elsewhere in the ~230 lines the bridge work changed in
+`place.py`. Worth finding: at 1.5% yield a corpus build does about six times
+the work for the same number of examples, and the loop's spec throughput is
+bounded by the same code.
 
 ## What is not measured
 
