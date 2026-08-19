@@ -172,7 +172,7 @@ def cmd_train(args) -> int:
         return 2
     from .data.corpus import load
     from .models import AutoregressiveModel, MaskedDiffusionModel, ModelConfig
-    from .train import TrainConfig, evaluate, train
+    from .train import TrainConfig, describe_device, evaluate, pick_device, train
 
     data = Path(args.corpus)
     train_set = load(data / "train.jsonl" if data.is_dir() else data)
@@ -190,7 +190,9 @@ def cmd_train(args) -> int:
         cfg = ModelConfig(n_layers=2, d_model=128, n_heads=4, d_ff=256)
     model = cls(cfg)
 
+    device = pick_device(args.device)
     print(f"{args.model} · {model.body.n_parameters():,} parameters")
+    print(f"device: {device} — {describe_device(device)}")
     print(f"{len(train_set)} training examples, {len(val_set)} validation")
     history = train(
         model,

@@ -44,7 +44,33 @@ def pick_device(requested: str = "auto") -> str:
 
     if requested != "auto":
         return requested
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        # ROCm reports itself through the cuda API, so this covers the RX 7600
+        # as well as any NVIDIA card. See docs/hardware.md.
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def describe_device(device: str) -> str:
+    """Name the accelerator, and say plainly when there is not one.
+
+    A silent fall back to CPU is the expensive kind of quiet: the run still
+    works, so nothing looks wrong, and it takes a hundredfold longer than the
+    person starting it expected.
+    """
+    require_torch()
+    import torch
+
+    if device.startswith("cuda") and torch.cuda.is_available():
+        name = torch.cuda.get_device_name(0)
+        version = getattr(torch.version, "hip", None)
+        stack = f"ROCm {version}" if version else f"CUDA {torch.version.cuda}"
+        return f"{name} ({stack})"
+    if device == "mps":
+        return "Apple GPU (Metal)"
+    return f"CPU ({torch.get_num_threads()} threads) — no accelerator found"
 
 
 def token_counts(examples: list[Example]) -> list[int]:

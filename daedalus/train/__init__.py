@@ -13,6 +13,7 @@ from .loop import (
 from .pretrain import (
     EVAL_RATIOS,
     TrainConfig,
+    describe_device,
     evaluate,
     load_checkpoint,
     pick_device,
@@ -30,6 +31,7 @@ __all__ = [
     "TrainConfig",
     "TrainingSet",
     "collapse_warning",
+    "describe_device",
     "evaluate",
     "load_checkpoint",
     "pick_device",
