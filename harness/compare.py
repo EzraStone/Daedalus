@@ -58,6 +58,9 @@ class Case:
 @dataclass
 class Report:
     cases: int = 0
+    #: How many were asked for. Short of it means the compiler could not build
+    #: enough, which changes what the agreement figure is a statement about.
+    requested: int = 0
     agreed: int = 0
     unreachable: int = 0
     by_divergence: dict[str, int] = field(default_factory=dict)
@@ -70,6 +73,7 @@ class Report:
 
     def as_dict(self) -> dict:
         return {
+            "requested": self.requested,
             "cases": self.cases,
             "checked": self.cases - self.unreachable,
             "agreed": self.agreed,
@@ -186,21 +190,47 @@ def classify(case: Case) -> str:
     return "unclassified"
 
 
-def build_cases(n: int, seed: int, verifier: Verifier) -> list[Case]:
+#: How many specs to draw per case wanted, per round. Corpus yield is a few
+#: percent once crossings are in the mix (see docs/benchmarks.md), so the old
+#: fixed 3x oversample fell far short of what was asked for.
+OVERSAMPLE = 12
+
+
+def build_cases(n: int, seed: int, verifier: Verifier, rounds: int = 6) -> list[Case]:
+    """Compile ``n`` verified cases, or as many as the effort budget allows.
+
+    Only a small fraction of sampled specs survive routing, so this keeps
+    drawing until it has enough or runs out of rounds. Falling short is
+    reported by the caller rather than passed off as success: an agreement
+    figure computed over a tenth of the requested sample is a different claim
+    from one computed over all of it, and the difference has to be visible.
+    """
     rng = random.Random(seed)
     cases: list[Case] = []
-    for i, spec in enumerate(sample_unique(rng, n * 3)):
+    seen: set[int] = set()
+    for _ in range(rounds):
         if len(cases) >= n:
             break
-        placed = spec.default_placement(rng)
-        attempt = compile_spec(spec, verifier, rng, attempts=10, fixed_placement=placed)
-        if attempt.ok:
-            cases.append(Case(f"case-{i:05d}", spec, placed, attempt.grid.tokens()))
+        wanted = (n - len(cases)) * OVERSAMPLE
+        for spec in sample_unique(rng, wanted, seen=seen):
+            if len(cases) >= n:
+                break
+            placed = spec.default_placement(rng)
+            attempt = compile_spec(spec, verifier, rng, attempts=10, fixed_placement=placed)
+            if attempt.ok:
+                cases.append(
+                    Case(f"case-{len(cases):05d}", spec, placed, attempt.grid.tokens())
+                )
     return cases
 
 
-def run(cases: list[Case], verifier: Verifier, client: GameClient | None) -> Report:
-    report = Report()
+def run(
+    cases: list[Case],
+    verifier: Verifier,
+    client: GameClient | None,
+    requested: int | None = None,
+) -> Report:
+    report = Report(requested=requested if requested is not None else len(cases))
     for case in cases:
         report.cases += 1
         simulate(case, verifier)
@@ -246,12 +276,19 @@ def main(argv=None) -> int:
 
     with Verifier() as verifier:
         cases = build_cases(args.cases, args.seed, verifier)
+        if len(cases) < args.cases:
+            print(
+                f"note: asked for {args.cases} cases, could build {len(cases)}. "
+                "Corpus yield is a few percent once crossings are in the mix; "
+                "see docs/benchmarks.md.",
+                file=sys.stderr,
+            )
         if args.dry_run:
-            report = run(cases, verifier, None)
+            report = run(cases, verifier, None, requested=args.cases)
         else:
             try:
                 with GameClient(args.host, args.port) as client:
-                    report = run(cases, verifier, client)
+                    report = run(cases, verifier, client, requested=args.cases)
             except OSError as e:
                 print(
                     f"could not reach the harness mod at {args.host}:{args.port}: {e}\n"

@@ -119,3 +119,24 @@ class TestReport:
     def test_the_rate_is_what_it_says(self, agreed, checked, expected):
         report = Report(cases=checked, agreed=agreed, unreachable=0)
         assert report.agreement == expected
+
+
+class TestCaseBuilding:
+    def test_it_builds_what_was_asked_for(self):
+        # Only a few percent of sampled specs survive routing, so a fixed 3x
+        # oversample silently returned a fraction of the requested cases -- and
+        # an agreement rate over a tenth of the intended sample is a different
+        # claim from one over all of it.
+        from compare import build_cases
+
+        from daedalus.redsim import Verifier
+
+        with Verifier() as verifier:
+            cases = build_cases(6, seed=0, verifier=verifier)
+        assert len(cases) == 6
+        assert len({c.name for c in cases}) == 6
+
+    def test_a_shortfall_is_visible_in_the_report(self):
+        report = Report(cases=3, requested=10, unreachable=3)
+        assert report.as_dict()["requested"] == 10
+        assert report.as_dict()["cases"] == 3
