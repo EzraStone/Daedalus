@@ -94,6 +94,8 @@ python -m daedalus doctor           # what is installed, what is missing
 python -m daedalus selftest         # builds and verifies a NAND gate
 
 python -m daedalus compile specs/nand.txt --out nand.schem
+python -m daedalus compile specs/nand.txt --out nand.json   # re-checkable layout
+python -m daedalus verify specs/nand.txt nand.json
 python -m daedalus corpus data/ --scale 0.1
 python -m daedalus baselines --specs 25
 python -m daedalus bench                # verifier throughput

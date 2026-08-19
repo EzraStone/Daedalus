@@ -156,3 +156,36 @@ class TestDoctor:
         assert main(["doctor"]) == 1
         out = capsys.readouterr().out
         assert "cargo build --release -p redsim" in out
+
+
+class TestVerifyRoundTrip:
+    """`compile` and `verify` have to agree about where the ports are."""
+
+    def test_a_compiled_layout_verifies(self, tmp_path):
+        out = tmp_path / "layout.json"
+        assert main(["compile", NAND, "--out", str(out), "--attempts", "30"]) == 0
+        # Before the layout carried its port rows this returned 1 with a
+        # port_violation: the compiler jitters the rows per attempt, so the
+        # grid was being checked against a placement it was never built for.
+        assert main(["verify", NAND, str(out)]) == 0
+
+    def test_the_saved_layout_carries_its_port_rows(self, tmp_path):
+        out = tmp_path / "layout.json"
+        main(["compile", NAND, "--out", str(out), "--attempts", "30"])
+        blob = json.loads(out.read_text())
+        assert len(blob["tokens"]) == V.CELLS
+        assert len(blob["input_z"]) == 2
+        assert len(blob["output_z"]) == 1
+
+    def test_a_bare_token_list_still_works_but_says_it_is_guessing(self, tmp_path, capsys):
+        # The old format. It cannot be checked exactly, and silently reporting
+        # a port violation for a working circuit is the worst way to say so.
+        spec = Spec.parse(NAND)
+        placed = spec.default_placement()
+        out = tmp_path / "bare.json"
+        built = tmp_path / "layout.json"
+        main(["compile", NAND, "--out", str(built), "--attempts", "30"])
+        out.write_text(json.dumps(json.loads(built.read_text())["tokens"]))
+        main(["verify", NAND, str(out)])
+        assert "no port rows" in capsys.readouterr().err
+        del placed

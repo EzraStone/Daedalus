@@ -54,19 +54,61 @@ def cmd_compile(args) -> int:
         from .schematic import block_summary, write_litematic, write_schem
 
         out = Path(args.out)
-        writer = write_litematic if out.suffix == ".litematic" else write_schem
-        writer(attempt.grid, out)
+        if out.suffix == ".json":
+            _write_layout(out, spec, attempt.placed, attempt.grid.tokens())
+        else:
+            writer = write_litematic if out.suffix == ".litematic" else write_schem
+            writer(attempt.grid, out)
         print(f"\nwrote {out}")
         print("materials:", ", ".join(f"{k} x{v}" for k, v in block_summary(attempt.grid).items()))
     return 0
+
+
+def _write_layout(path: Path, spec: Spec, placed, tokens: list[int]) -> None:
+    """Save a grid together with the port rows it was built against.
+
+    The tokens alone are not enough to re-check a circuit. Port rows are a
+    real degree of freedom and the compiler re-rolls them on every attempt, so
+    they cannot be recovered from the seed -- which attempt won decides them.
+    Writing them next to the grid is what makes `verify` exact instead of
+    approximately right.
+    """
+    path.write_text(
+        json.dumps(
+            {
+                "spec": spec.source(),
+                "input_z": list(placed.input_z),
+                "output_z": list(placed.output_z),
+                "tokens": tokens,
+            },
+            indent=2,
+        )
+    )
 
 
 def cmd_verify(args) -> int:
     from .grid import Grid
 
     spec = _read_spec(args.spec)
-    tokens = json.loads(Path(args.grid).read_text())
-    placed = spec.default_placement()
+    blob = json.loads(Path(args.grid).read_text())
+
+    if isinstance(blob, dict):
+        tokens = blob["tokens"]
+        placed = spec.place(blob["input_z"], blob["output_z"])
+    else:
+        # A bare list of ids carries no port rows, so the best available guess
+        # is the unjittered placement. That is frequently not the one the grid
+        # was built against, and the result is a working circuit reported as a
+        # port violation -- so say so rather than let it read as a real verdict.
+        tokens = blob
+        placed = spec.default_placement()
+        print(
+            "note: this file has no port rows, so the default placement is assumed.\n"
+            "      Re-export with `daedalus compile ... --out layout.json` for an\n"
+            "      exact check.",
+            file=sys.stderr,
+        )
+
     with Verifier() as v:
         verdict = v.evaluate(Grid.from_tokens(tokens), placed)
     print(verdict)
@@ -575,14 +617,14 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("compile", help="build a circuit from a spec, and verify it")
     p.add_argument("spec", help="spec source, or a path to a file containing one")
-    p.add_argument("--out", help="write a .schem or .litematic here")
+    p.add_argument("--out", help="write a .schem, .litematic, or .json layout here")
     p.add_argument("--attempts", type=int, default=20)
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_compile)
 
     p = sub.add_parser("verify", help="check a saved grid against a spec")
     p.add_argument("spec")
-    p.add_argument("grid", help="JSON file holding 1536 token ids")
+    p.add_argument("grid", help="a .json layout written by `compile --out`")
     p.set_defaults(func=cmd_verify)
 
     p = sub.add_parser("corpus", help="build a training corpus")
