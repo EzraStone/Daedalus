@@ -231,6 +231,57 @@ def cmd_sample(args) -> int:
     return 0 if passed else 1
 
 
+def cmd_loop(args) -> int:
+    """Run the verifier-guided self-improvement rounds of §06."""
+    if not _need_torch():
+        return 2
+    from .train import LoopConfig, collapse_warning, load_checkpoint, run
+    from .train.adapters import ModelSampler, ModelTrainer, anchors_from, spec_source
+
+    model = load_checkpoint(args.checkpoint, device=args.device)
+
+    anchors = []
+    if args.corpus:
+        from .data.corpus import load
+
+        data = Path(args.corpus)
+        anchors = anchors_from(load(data / "train.jsonl" if data.is_dir() else data))
+
+    cfg = LoopConfig(
+        rounds=args.rounds,
+        specs_per_round=args.specs,
+        candidates_per_spec=args.candidates,
+        seed=args.seed,
+    )
+    with Verifier() as v:
+        reports = run(
+            ModelSampler(model, steps=args.steps),
+            v,
+            spec_source,
+            cfg,
+            trainer=ModelTrainer(model),
+            anchors=anchors,
+            out_dir=args.out,
+        )
+
+    print(f"{'round':>5} {'gates':>7} {'pass@1':>8} {'pass@k':>8} {'kept':>6} {'layouts/spec':>13}")
+    for r in reports:
+        gates = f"{r.difficulty[0]}-{r.difficulty[1]}"
+        print(
+            f"{r.round:>5} {gates:>7} {r.pass_at_1:>8.3f} {r.pass_at_k:>8.3f}"
+            f" {r.accepted:>6} {r.layouts_per_spec:>13.2f}"
+        )
+
+    # Rising pass@1 with falling diversity is the failure mode that looks like
+    # success, so it is reported rather than left for someone to notice.
+    warning = collapse_warning(reports)
+    if warning:
+        print(f"\nWARNING: {warning}", file=sys.stderr)
+    if args.out:
+        print(f"\nwrote {Path(args.out) / 'rounds.jsonl'}")
+    return 0
+
+
 def _module_present(name: str) -> bool:
     import importlib.util
 
@@ -369,6 +420,18 @@ def main(argv=None) -> int:
     p.add_argument("--device", default="auto")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_sample)
+
+    p = sub.add_parser("loop", help="run the verifier-guided self-improvement rounds")
+    p.add_argument("checkpoint", help="a model.pt to start from")
+    p.add_argument("--corpus", help="corpus to draw anchor examples from")
+    p.add_argument("--out", help="write rounds.jsonl here")
+    p.add_argument("--rounds", type=int, default=5)
+    p.add_argument("--specs", type=int, default=200, help="specs per round")
+    p.add_argument("--candidates", type=int, default=16, help="candidates per spec")
+    p.add_argument("--steps", type=int, default=24, help="denoising steps (diffusion only)")
+    p.add_argument("--device", default="auto")
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(func=cmd_loop)
 
     p = sub.add_parser("serve", help="open the local web window")
     # Loopback by default: there is no auth here, and there should not be.
