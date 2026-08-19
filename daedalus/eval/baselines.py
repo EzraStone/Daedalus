@@ -137,6 +137,70 @@ class Unconditional:
 
 
 @dataclass
+class ConstrainedRandom:
+    """The floor a trained model actually has to clear.
+
+    Same random blocks as :class:`Unconditional`, with the two rules the
+    sampler enforces for free: a block that needs holding up gets a solid
+    block put under it, and levers and lamps only appear at declared ports.
+    Neither costs any training.
+
+    This exists because "97% of random grids are malformed" makes the
+    unconditional row look like a low bar that any model clears, when most of
+    what clears it is not learning at all. Separating the two says how much of
+    a model's well-formedness is the model and how much is the constraint,
+    which is the only way the pass rate of a real generator means anything.
+    """
+
+    rng: random.Random
+    density: float = 0.08
+    name: str = "constrained-random"
+
+    def __call__(self, spec: Spec, placed: PlacedSpec, k: int) -> list[list[int]]:
+        from ..models.common import _support_offset
+
+        del spec
+        # Levers and lamps are excluded outright: their legality is decided by
+        # the spec, not by physics, and one anywhere else is a port violation.
+        placeable = [
+            t
+            for t in V.BLOCK_TOKENS
+            if V.legal_at(t, V.LOGIC_Y) and V.decode(t).kind not in ("lever", "lamp")
+        ]
+        out = []
+        for _ in range(k):
+            grid = Grid.with_substrate()
+            for x, y, z in placed.input_ports:
+                grid.set(x, y, z, V.lever(V.Dir4.EAST))
+                grid.set(x + 1, y, z, V.SOLID)
+            for x, y, z in placed.output_ports:
+                grid.set(x, y, z, V.LAMP)
+
+            for z in range(V.SZ):
+                for x in range(2, V.SX - 1):
+                    if self.rng.random() >= self.density:
+                        continue
+                    token = self.rng.choice(placeable)
+                    offset = _support_offset(token)
+                    if offset is not None:
+                        sx, sy, sz = x + offset[0], V.LOGIC_Y + offset[1], z + offset[2]
+                        if not V.in_bounds(sx, sy, sz):
+                            continue
+                        # Do not prop a block up on a port cell: overwriting one
+                        # trades a support failure for a port violation.
+                        if (sx, sy, sz) in placed.input_ports or (
+                            sx,
+                            sy,
+                            sz,
+                        ) in placed.output_ports:
+                            continue
+                        grid.set(sx, sy, sz, V.SOLID)
+                    grid.set(x, V.LOGIC_Y, z, token)
+            out.append(grid.tokens())
+        return out
+
+
+@dataclass
 class PromptedLLM:
     """Baseline 2. A frontier model, asked in words.
 

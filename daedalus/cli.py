@@ -125,7 +125,14 @@ def cmd_corpus(args) -> int:
 
 def cmd_baselines(args) -> int:
     from .data import sample_unique
-    from .eval import ProceduralCompiler, Retrieval, Unconditional, grade, summarise
+    from .eval import (
+        ConstrainedRandom,
+        ProceduralCompiler,
+        Retrieval,
+        Unconditional,
+        grade,
+        summarise,
+    )
     from .synth import compile as compile_spec
 
     rng = random.Random(args.seed)
@@ -141,6 +148,7 @@ def cmd_baselines(args) -> int:
         methods = [
             ProceduralCompiler(v, rng, attempts=args.attempts),
             Retrieval(corpus),
+            ConstrainedRandom(rng),
             Unconditional(rng),
         ]
         table = {}

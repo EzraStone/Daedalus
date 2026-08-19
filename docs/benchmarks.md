@@ -35,26 +35,34 @@ minute of verification.
 
 ## Baselines
 
-`daedalus baselines --specs 20 --k 8 --attempts 12`, seed 0. Three of the four
-methods from §07; the prompted-LLM baseline needs an API key and has not been
-run.
+`daedalus baselines --specs 15 --k 8 --attempts 12`, seed 0. The prompted-LLM
+baseline from §07 needs an API key and has not been run; the rest are here.
 
 | method | pass@1 | pass@8 | diversity | malformed |
 |---|---|---|---|---|
-| procedural compiler | 0.250 | 0.250 | 4.00 | 0.000 |
-| retrieval | 0.250 | 0.250 | 1.00 | 0.000 |
-| unconditional | 0.000 | 0.000 | 0.00 | 0.969 |
+| procedural compiler | 0.267 | 0.267 | 4.25 | 0.000 |
+| retrieval | 0.200 | 0.200 | 1.00 | 0.000 |
+| constrained random | 0.000 | 0.000 | 0.00 | 0.042 |
+| unconditional | 0.000 | 0.000 | 0.00 | 0.992 |
 
-The unconditional row is the floor and it is worth looking at: 97% of random
-grids are malformed, so a model that learns nothing but "what a well-formed
-circuit looks like" already clears a bar. That is why the sampler's legality
-and support constraints matter — they hand that floor to the model for free,
-and the interesting question starts above it.
+The two random rows are the same sampler; the constrained one adds only what
+the model's sampler enforces for free — put a solid block under anything that
+needs holding up, and keep levers and lamps at declared ports. That alone
+takes the malformed rate from **99.2% to 4.2%**, a factor of twenty-four, with
+no training whatsoever.
 
-The compiler and retrieval tying at 0.250 is not a coincidence: retrieval is
-searching a corpus the compiler built, so it inherits the compiler's coverage.
-Diversity separates them — the compiler finds 4 distinct layouts per solved
-spec, retrieval finds 1 by construction.
+That comparison is the reason the row exists. "97% of random grids are
+malformed" makes well-formedness look like an achievement, and it is not one:
+almost all of it is available for free from two rules. Both random rows still
+score zero on pass@1, because a grid can be perfectly well-formed and compute
+nothing. So a trained model reporting a low malformed rate has demonstrated
+nothing on its own — the number that means something is the pass rate, and
+the floor for that is zero.
+
+Compiler and retrieval land close together for a reason: retrieval searches a
+corpus the compiler built, so it inherits the compiler's coverage and cannot
+exceed it. Diversity separates them — the compiler finds several distinct
+layouts per solved spec, retrieval finds one by construction.
 
 ## Corpus yield
 

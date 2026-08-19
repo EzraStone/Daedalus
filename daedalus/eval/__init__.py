@@ -1,6 +1,7 @@
 """Evaluation: metrics, and the four baselines all judged by one verifier."""
 
 from .baselines import (
+    ConstrainedRandom,
     Method,
     ProceduralCompiler,
     PromptedLLM,
@@ -30,6 +31,7 @@ __all__ = [
     "PromptedLLM",
     "Retrieval",
     "SpecResult",
+    "ConstrainedRandom",
     "Unconditional",
     "compactness_ratio",
     "diversity",

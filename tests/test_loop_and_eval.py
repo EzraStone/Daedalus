@@ -373,3 +373,49 @@ def _lookup(specs, placed):
         if p is placed or p == placed:
             return spec
     raise AssertionError("stub sampler got a placement it did not recognise")
+
+
+class TestConstrainedRandom:
+    """What the sampler's free constraints are worth, as a number."""
+
+    def test_it_is_dramatically_more_wellformed_than_pure_noise(self, verifier):
+        from daedalus.eval import ConstrainedRandom, Unconditional
+
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)")
+        placed = spec.default_placement()
+
+        def malformed_rate(method):
+            grids = method(spec, placed, 12)
+            verdicts = verifier.evaluate_batch(grids, placed)
+            return sum(v.kind == "malformed" for v in verdicts) / len(verdicts)
+
+        loose = malformed_rate(Unconditional(random.Random(0)))
+        tight = malformed_rate(ConstrainedRandom(random.Random(0)))
+        assert loose > 0.8, loose
+        assert tight < 0.2, tight
+
+    def test_wellformed_is_not_correct(self, verifier):
+        # The reason this baseline has to exist. Nearly every grid it produces
+        # is well-formed and none of them compute anything, so a model
+        # reporting a low malformed rate has demonstrated nothing on its own.
+        from daedalus.eval import ConstrainedRandom
+
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)")
+        placed = spec.default_placement()
+        grids = ConstrainedRandom(random.Random(0))(spec, placed, 12)
+        verdicts = verifier.evaluate_batch(grids, placed)
+        assert not any(v.is_pass() for v in verdicts)
+
+    def test_it_never_invents_a_port(self, verifier):
+        from daedalus.eval import ConstrainedRandom
+
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)")
+        placed = spec.default_placement()
+        allowed = {V.index(*p) for p in placed.input_ports} | {
+            V.index(*p) for p in placed.output_ports
+        }
+        for grid in ConstrainedRandom(random.Random(0))(spec, placed, 6):
+            for i, token in enumerate(grid):
+                if V.decode(token).kind in ("lever", "lamp"):
+                    assert i in allowed, V.unindex(i)
+        del verifier
