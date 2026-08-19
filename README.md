@@ -153,8 +153,13 @@ Run the tests:
 
 ```bash
 cargo test                          # 35 Rust tests, incl. the golden suite
-python -m pytest tests/ -q          # Python
+python -m pytest tests/ -q          # 270 Python tests
+python -m daedalus doctor           # or just ask what is missing
 ```
+
+The generator tests skip themselves without `torch`, so a run that installs
+only the base package reports fewer. CI runs them in a job of their own for
+exactly that reason.
 
 ---
 
