@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .. import vocab as V
-from .common import HAVE_TORCH, ModelConfig, as_legality, require_torch
+from .common import HAVE_TORCH, ModelConfig, as_legality, require_torch, support_tables
 
 if HAVE_TORCH:
     import torch
@@ -60,6 +60,7 @@ if HAVE_TORCH:
             top_k: int | None = None,
             legality=None,
             pinned=None,
+            enforce_support=True,
         ):
             """Generate grids one cell at a time in raster order.
 
@@ -71,22 +72,69 @@ if HAVE_TORCH:
             device = prefix.device
             batch = prefix.shape[0]
             legality = as_legality(legality, device)
+            sup_tokens, sup_required, opaque = support_tables(device)
             tokens = torch.cat(
                 [prefix, torch.zeros(batch, V.CELLS, dtype=torch.long, device=device)], dim=1
             )
+            # Supports that raster order has not reached yet. Placing a torch
+            # that hangs east means the block it hangs on is decided later, so
+            # the commitment is recorded here and honoured when the loop
+            # arrives, rather than being left to luck.
+            owed: dict[int, int] = {}
+
+            # Port cells are fixed from the start, so write them in now. Their
+            # values are already decided, and a support cell pinned to a lever
+            # can never become solid however far ahead it sits -- without this
+            # the veto below cannot see that and a torch hangs on nothing.
+            settled = torch.zeros(V.CELLS, dtype=torch.bool, device=device)
+            for cell, token in (pinned or {}).items():
+                tokens[:, self.cfg.prefix_len + cell] = token
+                settled[cell] = True
+
             for i in range(V.CELLS):
                 pos = self.cfg.prefix_len + i
-                logits = self(tokens[:, :pos])[:, -1]
                 if pinned is not None and i in pinned:
                     tokens[:, pos] = pinned[i]
                     continue
+                if i in owed:
+                    tokens[:, pos] = owed.pop(i)
+                    continue
+                logits = self(tokens[:, :pos])[:, -1]
                 if legality is not None:
                     logits = logits.masked_fill(~legality[i], float("-inf"))
+                if enforce_support:
+                    # Raster order is layer-major, so a cell's support sits
+                    # either lower down or earlier in the same layer -- decided
+                    # already, either way. That makes the rule exactly
+                    # checkable here, with no lookahead and nothing to revise.
+                    # Supports that read forward are left to the model.
+                    where = sup_required[i]
+                    decided = (where >= 0) & ((where < i) | settled[where.clamp_min(0)])
+                    if decided.any():
+                        held = opaque[tokens[:, self.cfg.prefix_len + where.clamp_min(0)]]
+                        veto = decided & ~held
+                        logits[:, sup_tokens] = logits[:, sup_tokens].masked_fill(
+                            veto, float("-inf")
+                        )
+                    logits[:, sup_tokens[where < 0]] = float("-inf")
                 logits = logits / max(temperature, 1e-5)
                 if top_k:
                     kth = logits.topk(min(top_k, logits.shape[-1]), dim=-1).values[:, -1:]
                     logits = logits.masked_fill(logits < kth, float("-inf"))
                 tokens[:, pos] = torch.multinomial(torch.softmax(logits, dim=-1), 1).squeeze(-1)
+
+                if enforce_support:
+                    # Whatever was just placed may owe a support cell further
+                    # along. One batch entry deciding this is enough to settle
+                    # the cell for all of them, so the veto above keeps the
+                    # rest consistent with it.
+                    for token in tokens[:, pos].tolist():
+                        slot = (sup_tokens == token).nonzero()
+                        if not slot.numel():
+                            continue
+                        target = int(sup_required[i, int(slot[0])])
+                        if target > i:
+                            owed.setdefault(target, V.SOLID)
             return tokens[:, self.cfg.prefix_len :]
 
 else:  # pragma: no cover - import-time stub

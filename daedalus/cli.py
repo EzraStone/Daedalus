@@ -202,7 +202,7 @@ def cmd_sample(args) -> int:
     kwargs = {"steps": args.steps} if hasattr(model, "loss_at") else {}
     bodies = model.sample(
         batch,
-        legality=T.legality_mask(),
+        legality=T.legality_mask(placed),
         pinned=T.port_mask(placed),
         **kwargs,
     )

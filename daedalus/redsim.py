@@ -240,19 +240,42 @@ class Verifier:
     # -- protocol ----------------------------------------------------------
 
     def _write(self, data: bytes) -> None:
+        """Write all of ``data``, however many syscalls that takes.
+
+        The worker is started unbuffered, so this pipe is a raw file object
+        and a single write is free to consume only part of the buffer. A
+        request is comfortably larger than a pipe (a batch of 64 grids is
+        ~98 KB against a 64 KB pipe), so the short write is the normal case
+        rather than the rare one.
+        """
         assert self._proc is not None and self._proc.stdin is not None
-        self._proc.stdin.write(data)
+        view = memoryview(data)
+        while view:
+            written = self._proc.stdin.write(view)
+            if not written:
+                raise VerifierError("redsim worker stopped accepting input")
+            view = view[written:]
 
     def _read_exact(self, n: int) -> bytes:
+        """Read exactly ``n`` bytes, or explain why it could not.
+
+        Same reason as the write side: an unbuffered read returns whatever
+        has arrived, which is not necessarily what was asked for. Treating a
+        short read as a dead worker misreports a perfectly healthy one, and
+        does it intermittently, which is the worst way to find out.
+        """
         assert self._proc is not None and self._proc.stdout is not None
-        buf = self._proc.stdout.read(n)
-        if buf is None or len(buf) != n:
-            code = self._proc.poll()
-            raise VerifierError(
-                f"redsim worker closed the pipe after {len(buf or b'')}/{n} bytes"
-                + (f" (exit {code})" if code is not None else "")
-            )
-        return buf
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = self._proc.stdout.read(n - len(buf))
+            if not chunk:
+                code = self._proc.poll()
+                raise VerifierError(
+                    f"redsim worker closed the pipe after {len(buf)}/{n} bytes"
+                    + (f" (exit {code})" if code is not None else "")
+                )
+            buf += chunk
+        return bytes(buf)
 
     def evaluate_batch(self, grids, spec) -> list[Verdict]:
         """Evaluate many candidate grids against one placed spec.

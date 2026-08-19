@@ -12,6 +12,7 @@ clone can run its whole test suite before anyone installs a 2 GB wheel.
 
 from __future__ import annotations
 
+import functools
 import math
 from dataclasses import dataclass
 
@@ -38,6 +39,60 @@ def require_torch() -> None:
             "  pip install torch --index-url https://download.pytorch.org/whl/rocm6.2\n"
             "See docs/hardware.md for the RX 7600 setup."
         )
+
+
+def _support_offset(token: int) -> tuple[int, int, int] | None:
+    """Which neighbour has to be solid for ``token`` to stand, if any.
+
+    Mirrors the four checks redsim makes when it decides a grid is malformed:
+    dust and repeaters and comparators sit on the block below, while torches
+    and levers attach in a direction the block state itself carries.
+    """
+    if token >= V.VOCAB_SIZE or V.is_control(token):
+        return None
+    d = V.decode(token)
+    if d.kind in ("wire", "repeater", "comparator"):
+        return (0, -1, 0)
+    if d.kind == "torch":
+        return d.attach.delta
+    if d.kind == "lever":
+        # A lever records a Dir4, which is horizontal and so carries no y.
+        dx, dz = d.attach.delta
+        return (dx, 0, dz)
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _support_geometry():
+    """``(tokens, required)`` for every block state that needs holding up.
+
+    ``required[i][k]`` is the cell that must be solid for ``tokens[k]`` to be
+    legal at cell ``i``, or ``-1`` when the support would fall outside the
+    build volume -- which makes the state impossible there rather than merely
+    unsupported.
+    """
+    tokens = [t for t in range(V.VOCAB_SIZE) if _support_offset(t) is not None]
+    offsets = [_support_offset(t) for t in tokens]
+    required = []
+    for i in range(V.CELLS):
+        x, y, z = V.unindex(i)
+        row = []
+        for dx, dy, dz in offsets:
+            nx, ny, nz = x + dx, y + dy, z + dz
+            row.append(V.index(nx, ny, nz) if V.in_bounds(nx, ny, nz) else -1)
+        required.append(row)
+    return tuple(tokens), tuple(tuple(r) for r in required)
+
+
+def support_tables(device):
+    """The support rules as tensors: which states, where to look, what counts."""
+    tokens, required = _support_geometry()
+    opaque = [t < V.VOCAB_SIZE and V.is_opaque(t) for t in range(TOTAL_VOCAB)]
+    return (
+        torch.tensor(tokens, dtype=torch.long, device=device),
+        torch.tensor(required, dtype=torch.long, device=device),
+        torch.tensor(opaque, dtype=torch.bool, device=device),
+    )
 
 
 def as_legality(mask, device):

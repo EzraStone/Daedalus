@@ -137,7 +137,7 @@ def decode_body(body) -> list[int]:
 # --------------------------------------------------------------------------
 
 
-def legality_mask() -> list[list[bool]]:
+def legality_mask(placed_spec=None) -> list[list[bool]]:
     """Per-cell mask of block states that are physically possible there.
 
     Free correctness with no training cost: zeroing the logits of impossible
@@ -153,14 +153,37 @@ def legality_mask() -> list[list[bool]]:
     on its own. Neighbour-dependent rules (dust needs support, a torch needs
     something to hang on) need the whole grid and belong in the sampler, which
     knows what it has committed to so far.
+
+    Pass ``placed_spec`` to also confine levers and lamps to the cells the
+    spec declares as ports. They are the two states whose legality is decided
+    entirely by the spec rather than by physics, and a stray one anywhere else
+    is a port violation the verifier will reject.
     """
+    levers = [t for t in range(V.VOCAB_SIZE) if _is_kind(t, "lever")]
+    lamps = [t for t in range(V.VOCAB_SIZE) if _is_kind(t, "lamp")]
+    inputs, outputs = set(), set()
+    if placed_spec is not None:
+        inputs = {V.index(*p) for p in placed_spec.input_ports}
+        outputs = {V.index(*p) for p in placed_spec.output_ports}
+
     mask = []
     for i in range(V.CELLS):
         _x, y, _z = V.unindex(i)
         row = [V.legal_at(t, y) for t in range(V.VOCAB_SIZE)]
         row.extend([False] * (TOTAL_VOCAB - V.VOCAB_SIZE))
+        if placed_spec is not None:
+            for t in levers:
+                row[t] = row[t] and i in inputs
+            for t in lamps:
+                row[t] = row[t] and i in outputs
         mask.append(row)
     return mask
+
+
+def _is_kind(token: int, kind: str) -> bool:
+    if V.is_control(token):
+        return False
+    return V.decode(token).kind == kind
 
 
 def port_mask(placed_spec) -> dict[int, int]:

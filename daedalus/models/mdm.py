@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from .. import vocab as V
 from ..tokens import TOTAL_VOCAB
-from .common import HAVE_TORCH, ModelConfig, as_legality, require_torch
+from .common import HAVE_TORCH, ModelConfig, as_legality, require_torch, support_tables
 
 #: The absorbing state, offset into the shared embedding table.
 MASK_ID = V.MASK
@@ -97,6 +97,55 @@ if HAVE_TORCH:
 
         # -- sampling ------------------------------------------------------
 
+        @staticmethod
+        def _settle_support(body, frozen, sup_tokens, sup_idx, in_volume, opaque, last=False):
+            """Make committed states and their supports agree.
+
+            The veto alone is not enough. Confidence-ordered unmasking reveals
+            many cells at once, so a block and the cell holding it up can be
+            committed in the same step, each looking permissible because the
+            other was still masked when the logits were scored.
+
+            Two repairs, in order: an undecided support becomes stone, which is
+            what the model implied by placing the block; and a block whose
+            support is already decided against it goes back to MASK, to be
+            reconsidered on a later step when the veto can see the conflict.
+            """
+            batch = body.shape[0]
+            lookup = torch.full((opaque.shape[0],), -1, dtype=torch.long, device=body.device)
+            lookup[sup_tokens] = torch.arange(len(sup_tokens), device=body.device)
+            slot = lookup[body]  # which support rule each committed state uses
+            needs = slot >= 0
+
+            rows = torch.arange(body.shape[1], device=body.device).expand(batch, -1)
+            where = sup_idx[rows, slot.clamp_min(0)]
+            valid = needs & in_volume[rows, slot.clamp_min(0)]
+
+            held = torch.where(valid, body.gather(1, where.clamp_min(0)), body)
+            prop = valid & (held == MASK_ID)
+            for b in range(batch):
+                targets = where[b][prop[b]]
+                if targets.numel():
+                    body[b, targets] = V.SOLID
+
+            # Re-read: a support just filled in is no longer a conflict.
+            held = torch.where(valid, body.gather(1, where.clamp_min(0)), body)
+            conflict = valid & ~opaque[held]
+            if not last:
+                body = body.masked_fill(conflict & ~frozen, MASK_ID)
+                return body
+
+            # On the final step there is no later pass to reconsider anything,
+            # and a cell left masked is malformed outright. So the support is
+            # overwritten instead: losing one block the model chose is a
+            # smaller loss than losing the whole grid.
+            for b in range(batch):
+                targets = where[b][conflict[b]]
+                if targets.numel():
+                    keep = targets[~frozen[targets]]
+                    body[b, keep] = V.SOLID
+            return body
+
         @torch.no_grad()
         def sample(
             self,
@@ -108,6 +157,7 @@ if HAVE_TORCH:
             legality=None,
             pinned=None,
             known=None,
+            enforce_support=True,
         ):
             """Confidence-ordered unmasking.
 
@@ -119,11 +169,20 @@ if HAVE_TORCH:
             ``guidance`` is classifier-free guidance in logit space. §05 expects
             this to be one of the largest single wins, so it is on by default
             and ``uncond_prefix`` makes the ablation a one-line change.
+
+            ``enforce_support`` is the neighbour-dependent half of legality,
+            which the position-only mask cannot express. Dust needs an opaque
+            block under it; an untrained model gets that wrong on four out of
+            five dust cells and every grid comes back malformed, so it is on by
+            default and off only for the ablation.
             """
             device = prefix.device
             batch = prefix.shape[0]
             p = self.cfg.prefix_len
             legality = as_legality(legality, device)
+            sup_tokens, sup_required, opaque = support_tables(device)
+            in_volume = sup_required >= 0
+            sup_idx = sup_required.clamp_min(0)
             body = torch.full((batch, V.CELLS), MASK_ID, dtype=torch.long, device=device)
 
             fixed = dict(pinned or {})
@@ -140,6 +199,15 @@ if HAVE_TORCH:
                     logits = uncond + guidance * (logits - uncond)
                 if legality is not None:
                     logits = logits.masked_fill(~legality, float("-inf"))
+                if enforce_support:
+                    # Veto any state whose support is already committed to
+                    # something that will not hold it. A support cell still
+                    # masked stays permissive -- it can yet become stone.
+                    held = body[:, sup_idx]  # (batch, cells, supported states)
+                    blocked = in_volume & (held != MASK_ID) & ~opaque[held]
+                    logits[:, :, sup_tokens] = logits[:, :, sup_tokens].masked_fill(
+                        blocked | ~in_volume, float("-inf")
+                    )
 
                 probs = torch.softmax(logits / max(temperature, 1e-5), dim=-1)
                 confidence, choice = probs.max(dim=-1)
@@ -161,6 +229,17 @@ if HAVE_TORCH:
                         continue
                     idx = confidence[b].topk(n_reveal).indices
                     body[b, idx] = choice[b, idx]
+
+                if enforce_support:
+                    body = self._settle_support(
+                        body,
+                        frozen,
+                        sup_tokens,
+                        sup_idx,
+                        in_volume,
+                        opaque,
+                        last=step == steps - 1,
+                    )
 
             # Anything still masked at the end is a cell the model would not
             # commit to. Leave it as MASK rather than guessing: the verifier

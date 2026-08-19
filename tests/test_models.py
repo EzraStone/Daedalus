@@ -39,19 +39,40 @@ def placed_nand():
     return spec, spec.default_placement(random.Random(0))
 
 
-def sample_once(cls, placed, seed: int = 0):
+def sample_once(cls, placed, seed: int = 0, **overrides):
+    return sample_many(cls, placed, 1, seed, **overrides)[0]
+
+
+def sample_many(cls, placed, n: int, seed: int = 0, **overrides):
     prefix, _slots = T.spec_prefix(placed)
     torch.manual_seed(seed)
     model = cls(TINY)
     model.eval()
     kwargs = {"steps": 8} if cls is MaskedDiffusionModel else {}
+    kwargs.update(overrides)
+    kwargs.setdefault("legality", T.legality_mask(placed))
     out = model.sample(
-        torch.tensor([prefix], dtype=torch.long),
-        legality=T.legality_mask(),
+        torch.tensor([prefix] * n, dtype=torch.long),
         pinned=T.port_mask(placed),
         **kwargs,
     )
-    return out[0].tolist()
+    return [row.tolist() for row in out]
+
+
+def unsupported(tokens) -> int:
+    """Blocks with nothing holding them up, by the verifier's own four rules."""
+    from daedalus.models.common import _support_offset
+
+    count = 0
+    for i, token in enumerate(tokens):
+        offset = _support_offset(token)
+        if offset is None:
+            continue
+        x, y, z = V.unindex(i)
+        nx, ny, nz = x + offset[0], y + offset[1], z + offset[2]
+        if not V.in_bounds(nx, ny, nz) or not V.is_opaque(tokens[V.index(nx, ny, nz)]):
+            count += 1
+    return count
 
 
 class TestTraining:
@@ -113,6 +134,93 @@ class TestSampling:
         row = mask[V.index(4, V.SUBSTRATE_Y, 4)]
         assert row[V.AIR] and row[V.SOLID]
         assert not row[V.WIRE]
+
+
+class TestSupport:
+    """The neighbour-dependent half of legality, which a position-only mask cannot see."""
+
+    def test_the_rules_match_the_verifier(self):
+        from daedalus.models.common import _support_offset
+
+        # redsim checks four: dust, repeaters and comparators sit on the block
+        # below; torches and levers attach in the direction they carry.
+        assert _support_offset(V.WIRE) == (0, -1, 0)
+        assert _support_offset(V.repeater(V.Dir4.NORTH, 1)) == (0, -1, 0)
+        assert _support_offset(V.comparator(V.Dir4.EAST, False)) == (0, -1, 0)
+        assert _support_offset(V.torch(V.Attach.WEST)) == (-1, 0, 0)
+        assert _support_offset(V.torch(V.Attach.FLOOR)) == (0, -1, 0)
+        assert _support_offset(V.lever(V.Dir4.EAST)) == (1, 0, 0)
+        # Everything else stands on its own.
+        assert _support_offset(V.SOLID) is None
+        assert _support_offset(V.LAMP) is None
+        assert _support_offset(V.MASK) is None
+
+    @pytest.mark.parametrize("name,cls", BOTH)
+    def test_nothing_floats(self, name, cls):
+        _spec, placed = placed_nand()
+        for tokens in sample_many(cls, placed, 4):
+            assert unsupported(tokens) == 0, name
+
+    @pytest.mark.parametrize("name,cls", BOTH)
+    def test_turning_it_off_lets_blocks_float(self, name, cls):
+        # The ablation has to still work, and this is also the evidence that
+        # the constraint above is doing something rather than being a no-op on
+        # a model that happened to get it right.
+        _spec, placed = placed_nand()
+        loose = sum(
+            unsupported(t) for t in sample_many(cls, placed, 4, enforce_support=False)
+        )
+        assert loose > 0, name
+
+    def test_a_grid_survives_the_checks_that_run_before_simulation(self):
+        # The point of the whole constraint. These four reasons are decided by
+        # inspecting the grid, so a sample earning one is thrown out before it
+        # is ever simulated and the verdict carries nothing the loop can rank
+        # -- every candidate is equally, uninformatively bad. Getting past them
+        # is what turns a sample into a scoreable one.
+        #
+        # Burnout is deliberately not in this list: a torch killing itself is
+        # something the simulator discovers by running, which means the grid
+        # was well-formed enough to run.
+        static = {"unsupported", "floating_dust", "port_violation", "masked_cell"}
+        _spec, placed = placed_nand()
+        with Verifier() as v:
+            verdicts = [
+                v.evaluate(Grid.from_tokens(t), placed)
+                for t in sample_many(MaskedDiffusionModel, placed, 4)
+            ]
+        offending = [x for x in verdicts if getattr(x, "reason", None) in static]
+        assert not offending, offending[0]
+
+
+class TestPortLegality:
+    def test_levers_and_lamps_are_confined_to_declared_ports(self):
+        _spec, placed = placed_nand()
+        mask = T.legality_mask(placed)
+        inputs = {V.index(*p) for p in placed.input_ports}
+        outputs = {V.index(*p) for p in placed.output_ports}
+        lever, lamp = V.lever(V.Dir4.EAST), V.LAMP
+        for cell, row in enumerate(mask):
+            assert row[lever] == (cell in inputs)
+            assert row[lamp] == (cell in outputs)
+
+    def test_without_a_spec_the_mask_is_position_only(self):
+        # The spec-free form is still what the corpus and the ablations use.
+        mask = T.legality_mask()
+        assert any(row[V.LAMP] for row in mask)
+
+    @pytest.mark.parametrize("name,cls", BOTH)
+    def test_no_stray_ports_are_generated(self, name, cls):
+        _spec, placed = placed_nand()
+        allowed = set(T.port_mask(placed))
+        for tokens in sample_many(cls, placed, 2):
+            for i, token in enumerate(tokens):
+                # A diffusion sample may still hold MASK where the model would
+                # not commit, and that is not a block state to decode.
+                if V.is_control(token):
+                    continue
+                if V.decode(token).kind in ("lever", "lamp"):
+                    assert i in allowed, f"{name}: stray port at {V.unindex(i)}"
 
 
 class TestEndToEnd:
