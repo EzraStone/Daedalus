@@ -114,6 +114,46 @@ def cmd_baselines(args) -> int:
     return 0
 
 
+def cmd_bench(args) -> int:
+    """Measure verifier throughput, so the README's number is reproducible."""
+    import statistics
+    import time
+
+    from .synth import compile as compile_spec
+
+    rng = random.Random(args.seed)
+    spec = _read_spec(args.spec) if args.spec else Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)")
+    placed = spec.default_placement(rng)
+
+    with Verifier() as v:
+        attempt = compile_spec(spec, v, rng, attempts=30, fixed_placement=placed)
+        if not attempt.ok:
+            print("could not build a circuit to benchmark", file=sys.stderr)
+            return 1
+        grid = attempt.grid
+
+        # Batched, because that is how the loop calls it: one request carrying
+        # many grids amortises the pipe over the whole batch, and a per-call
+        # figure measured one grid at a time is really a measure of the pipe.
+        v.evaluate_batch([grid] * 8, placed)  # warm the worker
+
+        per_call = []
+        for _ in range(args.repeats):
+            started = time.perf_counter()
+            v.evaluate_batch([grid] * args.batch, placed)
+            per_call.append((time.perf_counter() - started) / args.batch)
+
+    micros = sorted(x * 1e6 for x in per_call)
+    print(f"grid: {attempt.verdict}")
+    print(f"batch {args.batch} x {args.repeats} repeats\n")
+    print(f"  median   {statistics.median(micros):8.1f} us/evaluation")
+    print(f"  mean     {statistics.fmean(micros):8.1f} us")
+    print(f"  fastest  {micros[0]:8.1f} us")
+    print(f"  slowest  {micros[-1]:8.1f} us")
+    print(f"\n  {1e6 / statistics.median(micros):,.0f} evaluations/second")
+    return 0
+
+
 def _need_torch() -> bool:
     from .models import HAVE_TORCH
 
@@ -420,6 +460,13 @@ def main(argv=None) -> int:
     p.add_argument("--device", default="auto")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_sample)
+
+    p = sub.add_parser("bench", help="measure verifier throughput")
+    p.add_argument("spec", nargs="?", help="spec to benchmark against (default: a NAND)")
+    p.add_argument("--batch", type=int, default=64, help="grids per request")
+    p.add_argument("--repeats", type=int, default=50)
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(func=cmd_bench)
 
     p = sub.add_parser("loop", help="run the verifier-guided self-improvement rounds")
     p.add_argument("checkpoint", help="a model.pt to start from")

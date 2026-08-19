@@ -15,7 +15,9 @@ That single change buys three things:
 
 - **A dense, free, non-human reward signal.** No annotators, no aesthetic
   preference model. Every sample gets an exact pass/fail plus continuous scores
-  for latency and footprint, in about 150 microseconds.
+  for latency and footprint, in about 41 microseconds when batched the way the
+  loop batches — see [`docs/benchmarks.md`](docs/benchmarks.md), and run
+  `daedalus bench` to reproduce it.
 - **Unlimited perfectly-labelled training data.** Compose known-good primitives
   into random graphs and derive the label from the graph. No scraped
   schematics, no licensing ambiguity, no noisy captions.
@@ -60,20 +62,21 @@ no README.
 
 | Component | State |
 |---|---|
-| `crates/redsim` — the verifier | Complete. 104-case golden suite, 35 tests, ~153 µs per evaluation in release. |
+| `crates/redsim` — the verifier | Complete. 104-case golden suite, 35 tests, 41 µs per evaluation batched (188 µs one at a time — the difference is pipe round-trip, not simulation). |
 | `daedalus.spec` — the DSL | Complete. Full grammar, canonicalisation, semantic hashing byte-identical to the Rust side. |
 | `daedalus.synth` — the procedural compiler | Working. Planar routing plus verified two-level bridges for crossbar netlists. |
 | `daedalus.data` — the corpus engine | Working end to end. Builds, verifies, splits, writes a dataset card. |
 | `daedalus.schematic` — export | Complete. `.schem` and `.litematic`, dependency-free NBT. |
 | `daedalus.eval` — metrics and baselines | Complete. Three of four baselines runnable today. |
 | `daedalus.web` — the local window | Complete. Watch a spec get placed, routed and verified, step by step. |
-| `daedalus.train.loop` — the §06 loop | Complete and tested against a stub sampler. |
+| `daedalus.train.loop` — the §06 loop | Complete. Runs end to end with a real model via `daedalus loop`; no model good enough to make the curve mean anything yet. |
+| `daedalus.models` — AR and diffusion | Both train and sample on CPU. Checkpoints save and reload; samples clear every pre-simulation check and come back with real verdicts. |
 
 ### Written but not yet run
 
 | Component | Why |
 |---|---|
-| `daedalus.models` — AR and diffusion | The code is complete and shaped correctly, but **no model has been trained**. There is no checkpoint, no loss curve, no pass@k. `torch` is an optional dependency and the environment this was built in has neither it nor a GPU. |
+| a model worth the name | The code runs, but **nothing has been trained at a useful size**. The largest run so far is 557K parameters for 48 steps on a CPU, which verifies nothing. There is no pass@k worth quoting. |
 | `harness/mod` — the Fabric mod | Committed as source with the protocol pinned. Never compiled, never run: no Minecraft server available. |
 | sim↔game agreement | **Not measured.** This is the number that would make everything else believable, and it does not exist yet. See [`docs/divergences.md`](docs/divergences.md). |
 
@@ -92,7 +95,30 @@ python -m daedalus selftest         # builds and verifies a NAND gate
 python -m daedalus compile specs/nand.txt --out nand.schem
 python -m daedalus corpus data/ --scale 0.1
 python -m daedalus baselines --specs 25
+python -m daedalus bench                # verifier throughput
 ```
+
+### Training
+
+```bash
+pip install -e ".[train]"
+python -m daedalus train data/ --out runs/first
+python -m daedalus sample runs/first/model.pt specs/nand.txt -k 8
+python -m daedalus loop runs/first/model.pt --corpus data/ --rounds 5
+```
+
+`train` prints a validation loss alongside the training loss, and for the
+diffusion model that is the only one worth reading: the objective draws a mask
+rate per batch and scales by `1/t`, so the per-batch number swings by an order
+of magnitude on a model that has not changed. `sample` sends every candidate
+to the verifier and exits non-zero if none of them pass, which on an
+undertrained model is the expected outcome and the point — the reward signal
+is attached and reporting.
+
+`loop` runs the §06 rounds: sample, verify, keep what passes, retrain, advance
+the curriculum on merit. It prints the collapse warning on the way out, since
+rising pass@1 with falling diversity is the failure mode that looks like
+success.
 
 ### The window
 
