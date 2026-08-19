@@ -90,6 +90,7 @@ deliberately throughout, and closing it is the single highest-value next step.
 
 ```bash
 cargo build --release -p redsim     # the verifier; everything depends on it
+python -m daedalus doctor           # what is installed, what is missing
 python -m daedalus selftest         # builds and verifies a NAND gate
 
 python -m daedalus compile specs/nand.txt --out nand.schem
@@ -309,13 +310,20 @@ docs/                     design spec, divergences, hardware notes
 
 1. **Measure sim↔game agreement.** Build the Fabric mod, run
    `harness/compare.py --cases 10000`, publish the number. Nothing else in this
-   repository means much until this exists.
-2. **Train the models.** The code is written; it needs a GPU and a corpus.
-3. **Run the loop.** Five rounds, plot pass@1 and `layouts_per_spec` on the same
-   axes — the second is the collapse alarm and the whole approach fails quietly
-   without it.
+   repository means much until this exists. Unchanged, and still first.
+2. **Train a model at a size that means something.** The pipeline runs
+   end to end — `daedalus train`, `sample`, `repair`, `loop` all work, and the
+   plumbing is tested — but the largest run so far is 557K parameters for 48
+   steps on a CPU. That verifies nothing, and it is supposed to. What is
+   missing is a GPU and a few hours, not code.
+3. **Then run the loop for real.** Five rounds, plot pass@1 and
+   `layouts_per_spec` on the same axes — the second is the collapse alarm and
+   the whole approach fails quietly without it. `daedalus loop` already prints
+   the warning; nothing has yet given it anything to warn about.
 4. **Broaden bridge coverage.** Measure crossbar success by topology, then add
    compact vertical primitives for placements the conservative span rejects.
+   The seven-cell span is expensive: see the yield figures in
+   [`docs/benchmarks.md`](docs/benchmarks.md) for what XOR coverage costs.
 
 ## Licence
 

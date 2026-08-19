@@ -130,3 +130,29 @@ class TestTraining:
         (empty / "train.jsonl").write_text("")
         assert main(["train", str(empty), "--tiny"]) == 1
         assert "no examples" in capsys.readouterr().err
+
+
+class TestDoctor:
+    def test_a_healthy_install_reports_ready(self, capsys):
+        assert main(["doctor"]) == 0
+        out = capsys.readouterr().out
+        assert "verifier" in out and "compiler" in out
+        assert "ready" in out
+
+    def test_a_missing_extra_does_not_fail_the_check(self, capsys, monkeypatch):
+        # An extra is a choice. Failing on one would tell a fresh clone its
+        # install is broken when it is only minimal.
+        monkeypatch.setattr("daedalus.cli._module_present", lambda name: False)
+        assert main(["doctor"]) == 0
+        assert "optional extras not installed" in capsys.readouterr().out
+
+    def test_a_missing_verifier_is_fatal_and_says_how_to_fix_it(self, capsys, monkeypatch):
+        from daedalus.redsim import VerifierError
+
+        def absent(*a, **k):
+            raise VerifierError("could not find the redsim binary")
+
+        monkeypatch.setattr("daedalus.redsim.find_binary", absent)
+        assert main(["doctor"]) == 1
+        out = capsys.readouterr().out
+        assert "cargo build --release -p redsim" in out

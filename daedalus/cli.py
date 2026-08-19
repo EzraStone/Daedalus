@@ -114,6 +114,84 @@ def cmd_baselines(args) -> int:
     return 0
 
 
+def cmd_doctor(args) -> int:
+    """Check everything a fresh clone needs, and say what is missing.
+
+    The failure a newcomer actually hits is the verifier binary not being
+    built, and they hit it three commands later as a stack trace. This asks
+    every question up front and answers all of them, rather than stopping at
+    the first thing that is wrong.
+    """
+    del args
+    core_ok = True
+    missing_extras: list[str] = []
+
+    def report(name: str, good: bool, detail: str, required: bool = False) -> None:
+        nonlocal core_ok
+        if not good:
+            if required:
+                core_ok = False
+            else:
+                missing_extras.append(name)
+        print(f"  {'ok  ' if good else 'MISS'}  {name:<22} {detail}")
+
+    print("daedalus", __version__)
+
+    try:
+        from .redsim import find_binary
+
+        binary = find_binary()
+        report("verifier", True, str(binary), required=True)
+    except VerifierError as e:
+        report("verifier", False, f"{e}", required=True)
+        binary = None
+
+    if binary is not None:
+        try:
+            with Verifier() as v:
+                spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)")
+                from .synth import compile as compile_spec
+
+                attempt = compile_spec(spec, v, random.Random(0), attempts=30)
+            report(
+                "compiler",
+                attempt.ok,
+                str(attempt.verdict) if attempt.ok else f"could not build a NAND ({attempt.stage})",
+                required=True,
+            )
+        except VerifierError as e:
+            report("compiler", False, str(e), required=True)
+
+    from .models import HAVE_TORCH
+
+    if HAVE_TORCH:
+        from .train import describe_device, pick_device
+
+        device = pick_device("auto")
+        report("torch", True, f"{device} — {describe_device(device)}")
+    else:
+        report("torch", False, "not installed — pip install 'daedalus[train]' (optional)")
+
+    for extra, modules in (("web", ("fastapi", "uvicorn", "websockets")), ("tui", ("textual",))):
+        missing = [m for m in modules if not _module_present(m)]
+        report(
+            extra,
+            not missing,
+            "ready" if not missing else f"missing {', '.join(missing)} (optional)",
+        )
+
+    # Only the verifier and the compiler are required. A missing extra is a
+    # choice, not a broken install, so it must not fail the exit code.
+    if not core_ok:
+        print("\nnot ready — build the verifier with `cargo build --release -p redsim`")
+        return 1
+    if missing_extras:
+        print(f"\nready. optional extras not installed: {', '.join(missing_extras)}")
+    else:
+        print("\nready")
+    return 0
+
+
 def cmd_bench(args) -> int:
     """Measure verifier throughput, so the README's number is reproducible."""
     import statistics
@@ -552,6 +630,9 @@ def main(argv=None) -> int:
     p.add_argument("--device", default="auto")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_repair)
+
+    p = sub.add_parser("doctor", help="check the install and say what is missing")
+    p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("bench", help="measure verifier throughput")
     p.add_argument("spec", nargs="?", help="spec to benchmark against (default: a NAND)")
