@@ -223,6 +223,90 @@ class TestPortLegality:
                     assert i in allowed, f"{name}: stray port at {V.unindex(i)}"
 
 
+class TestRepair:
+    """Inpainting: the operation the diffusion model exists for.
+
+    It was written, documented as the thing that "turns this from a demo into
+    something a player would actually open", and then never called by anything
+    -- not the evaluation harness, not the CLI, not a test.
+    """
+
+    def damaged_grid(self, placed, hurt: int = 8):
+        tokens = [V.AIR] * V.CELLS
+        for x in range(V.SX):
+            for z in range(V.SZ):
+                tokens[V.index(x, 0, z)] = V.SOLID
+        for cell, token in T.port_mask(placed).items():
+            tokens[cell] = token
+        broken = [V.index(4 + i, V.LOGIC_Y, 4) for i in range(hurt)]
+        for cell in broken:
+            tokens[cell] = V.WIRE
+        return tokens, broken
+
+    def test_untouched_cells_are_left_exactly_alone(self):
+        # The whole contract. If repair rewrites cells outside the damage it is
+        # not repair, it is generation with extra steps.
+        _spec, placed = placed_nand()
+        tokens, broken = self.damaged_grid(placed)
+        torch.manual_seed(0)
+        model = MaskedDiffusionModel(TINY)
+        model.eval()
+        prefix, _slots = T.spec_prefix(placed)
+        out = model.repair(
+            torch.tensor([prefix], dtype=torch.long),
+            torch.tensor([tokens], dtype=torch.long),
+            broken,
+            steps=6,
+            legality=T.legality_mask(placed),
+        )
+        got = out[0].tolist()
+        for i in range(V.CELLS):
+            if i not in set(broken):
+                assert got[i] == tokens[i], f"repair touched {V.unindex(i)}"
+
+    def test_a_batched_prefix_gives_several_repairs_of_one_circuit(self):
+        _spec, placed = placed_nand()
+        tokens, broken = self.damaged_grid(placed)
+        torch.manual_seed(0)
+        model = MaskedDiffusionModel(TINY)
+        model.eval()
+        prefix, _slots = T.spec_prefix(placed)
+        out = model.repair(
+            torch.tensor([prefix] * 3, dtype=torch.long),
+            torch.tensor([tokens], dtype=torch.long),
+            broken,
+            steps=6,
+            legality=T.legality_mask(placed),
+        )
+        assert out.shape[0] == 3
+
+    def test_it_accepts_a_plain_list_for_the_grid(self):
+        _spec, placed = placed_nand()
+        tokens, broken = self.damaged_grid(placed)
+        model = MaskedDiffusionModel(TINY)
+        model.eval()
+        prefix, _slots = T.spec_prefix(placed)
+        out = model.repair(
+            torch.tensor([prefix], dtype=torch.long), tokens, broken, steps=4
+        )
+        assert out.shape[1] == V.CELLS
+
+    def test_a_batch_of_grids_is_refused(self):
+        # Ambiguous: it would silently repair only the first and report k
+        # results, which reads as k repairs of k circuits.
+        _spec, placed = placed_nand()
+        tokens, broken = self.damaged_grid(placed)
+        model = MaskedDiffusionModel(TINY)
+        prefix, _slots = T.spec_prefix(placed)
+        with pytest.raises(ValueError, match="one grid"):
+            model.repair(
+                torch.tensor([prefix] * 2, dtype=torch.long),
+                torch.tensor([tokens, tokens], dtype=torch.long),
+                broken,
+                steps=2,
+            )
+
+
 class TestEndToEnd:
     @pytest.mark.parametrize("name,cls", BOTH)
     def test_the_verifier_reads_what_the_model_writes(self, name, cls):

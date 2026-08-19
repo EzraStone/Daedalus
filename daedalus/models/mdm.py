@@ -252,10 +252,20 @@ if HAVE_TORCH:
 
             The same forward pass as generation. That is the whole argument for
             masked diffusion over an autoregressive model in this domain.
+
+            ``tokens`` is one grid -- the damaged circuit -- given as a
+            ``(1, CELLS)`` tensor or any sequence of ``CELLS`` ids. ``prefix``
+            may be a batch, which is how you ask for several different repairs
+            of the same damage and let the verifier pick.
             """
-            known = {
-                i: int(tokens[0, i].item()) for i in range(V.CELLS) if i not in set(damaged)
-            }
+            if not torch.is_tensor(tokens):
+                tokens = torch.tensor(tokens, dtype=torch.long, device=prefix.device)
+            if tokens.dim() == 1:
+                tokens = tokens[None]
+            if tokens.shape[0] != 1:
+                raise ValueError("repair takes one grid; batch the prefix instead")
+            damaged = set(damaged)
+            known = {i: int(tokens[0, i]) for i in range(V.CELLS) if i not in damaged}
             return self.sample(prefix, known=known, **kwargs)
 
 else:  # pragma: no cover - import-time stub

@@ -273,6 +273,85 @@ def cmd_sample(args) -> int:
     return 0 if passed else 1
 
 
+def cmd_repair(args) -> int:
+    """Break a working circuit, then ask the model to put it back.
+
+    This is the operation masked diffusion exists for: the same forward pass
+    as generation, with a different set of cells held fixed. An autoregressive
+    model cannot do it at all, which is the comparison §07 is built around.
+    """
+    if not _need_torch():
+        return 2
+    import torch
+
+    from . import tokens as T
+    from . import vocab as V
+    from .data.corpus import Example, corrupt
+    from .grid import Grid
+    from .synth import compile as compile_spec
+    from .train import load_checkpoint
+
+    spec = _read_spec(args.spec)
+    rng = random.Random(args.seed)
+    placed = spec.default_placement(rng)
+    model = load_checkpoint(args.checkpoint, device=args.device)
+    model.eval()
+    if not hasattr(model, "repair"):
+        print("only the diffusion model can repair", file=sys.stderr)
+        return 2
+
+    with Verifier() as v:
+        built = compile_spec(spec, v, rng, attempts=args.attempts, fixed_placement=placed)
+        if not built.ok:
+            print(f"could not build a circuit to damage: {built.stage}", file=sys.stderr)
+            return 1
+        working = built.grid.tokens()
+        print(f"built    {built.verdict}")
+
+        example = Example(
+            spec_source=spec.source(),
+            spec_hash=spec.key(),
+            gates=spec.gates,
+            n_inputs=spec.n_inputs,
+            n_outputs=spec.n_outputs,
+            rows=list(spec.rows),
+            input_z=list(placed.input_z),
+            output_z=list(placed.output_z),
+            tokens=working,
+            latency_rt=built.verdict.latency_rt,
+            blocks=built.verdict.blocks,
+            bbox=list(built.verdict.bbox),
+            prompts=[],
+        )
+        damaged, hit = corrupt(example, rng, blocks=args.blocks)
+        print(f"damaged  {v.evaluate(Grid.from_tokens(damaged), placed)}  ({len(hit)} cells)")
+
+        torch.manual_seed(args.seed)
+        prefix, _slots = T.spec_prefix(placed)
+        device = next(model.parameters()).device
+        out = model.repair(
+            torch.tensor([prefix] * args.k, dtype=torch.long, device=device),
+            torch.tensor([damaged], dtype=torch.long, device=device),
+            hit,
+            steps=args.steps,
+            legality=T.legality_mask(placed),
+            pinned=T.port_mask(placed),
+        )
+        candidates = [row.tolist() for row in out.cpu()]
+        verdicts = v.evaluate_batch([Grid.from_tokens(c) for c in candidates], placed)
+
+    print()
+    for i, verdict in enumerate(verdicts):
+        changed = sum(1 for a, b in zip(candidates[i], working) if a != b)
+        print(f"  {i:>2}  {verdict}  ({changed} cells differ from the original)")
+    fixed = [c for c, verdict in zip(candidates, verdicts) if verdict.is_pass()]
+    print(f"\n{len(fixed)}/{args.k} repaired")
+    if fixed:
+        print(Grid.from_tokens(fixed[0]).render())
+    del V
+    return 0 if fixed else 1
+
+
 def cmd_loop(args) -> int:
     """Run the verifier-guided self-improvement rounds of §06."""
     if not _need_torch():
@@ -462,6 +541,17 @@ def main(argv=None) -> int:
     p.add_argument("--device", default="auto")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_sample)
+
+    p = sub.add_parser("repair", help="damage a working circuit and have the model rebuild it")
+    p.add_argument("checkpoint", help="a diffusion model.pt")
+    p.add_argument("spec", help="spec source, or a path to a file containing one")
+    p.add_argument("--blocks", type=int, default=6, help="cells to knock out")
+    p.add_argument("-k", type=int, default=8, help="repair attempts to draw")
+    p.add_argument("--steps", type=int, default=24)
+    p.add_argument("--attempts", type=int, default=30, help="compiler attempts to build one")
+    p.add_argument("--device", default="auto")
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(func=cmd_repair)
 
     p = sub.add_parser("bench", help="measure verifier throughput")
     p.add_argument("spec", nargs="?", help="spec to benchmark against (default: a NAND)")
