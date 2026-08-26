@@ -86,50 +86,80 @@ def _write_layout(path: Path, spec: Spec, placed, tokens: list[int]) -> None:
     )
 
 
-def cmd_verify(args) -> int:
+def _load_layout(spec: Spec, path: Path):
+    """Read a saved circuit and work out the placement it belongs to.
+
+    Three formats reach this. A .json layout written by ``compile --out``
+    carries its port rows and is exact. A schematic carries blocks only, so
+    the rows are read off the faces. A bare list of ids carries neither, and
+    says so.
+    """
     from .grid import Grid
 
-    spec = _read_spec(args.spec)
-    path = Path(args.grid)
-
     if path.suffix in (".schem", ".litematic"):
-        # A circuit that has been through the game, or through anyone's
-        # editor. Port rows are not recorded in a schematic, so the placement
-        # has to be inferred from where the levers and lamps actually are.
         from .schematic import read_schem
 
         grid = read_schem(path)
-        placed = _placement_from_grid(spec, grid)
-        with Verifier() as v:
-            verdict = v.evaluate(grid, placed)
-        print(f"ports: inputs at rows {list(placed.input_z)}, "
-              f"outputs at rows {list(placed.output_z)}")
-        print(verdict)
-        return 0 if verdict.is_pass() else 1
+        return grid, _placement_from_grid(spec, grid)
 
     blob = json.loads(path.read_text())
-
     if isinstance(blob, dict):
-        tokens = blob["tokens"]
-        placed = spec.place(blob["input_z"], blob["output_z"])
-    else:
-        # A bare list of ids carries no port rows, so the best available guess
-        # is the unjittered placement. That is frequently not the one the grid
-        # was built against, and the result is a working circuit reported as a
-        # port violation -- so say so rather than let it read as a real verdict.
-        tokens = blob
-        placed = spec.default_placement()
-        print(
-            "note: this file has no port rows, so the default placement is assumed.\n"
-            "      Re-export with `daedalus compile ... --out layout.json` for an\n"
-            "      exact check.",
-            file=sys.stderr,
-        )
+        return Grid.from_tokens(blob["tokens"]), spec.place(blob["input_z"], blob["output_z"])
 
+    # A bare list of ids carries no port rows, so the best available guess is
+    # the unjittered placement. That is frequently not the one the grid was
+    # built against, and the result is a working circuit reported as a port
+    # violation -- so say so rather than let it read as a real verdict.
+    print(
+        "note: this file has no port rows, so the default placement is assumed.\n"
+        "      Re-export with `daedalus compile ... --out layout.json` for an\n"
+        "      exact check.",
+        file=sys.stderr,
+    )
+    return Grid.from_tokens(blob), spec.default_placement()
+
+
+def cmd_verify(args) -> int:
+    spec = _read_spec(args.spec)
+    path = Path(args.grid)
+    grid, placed = _load_layout(spec, path)
+    if path.suffix in (".schem", ".litematic"):
+        print(f"ports: inputs at rows {list(placed.input_z)}, "
+              f"outputs at rows {list(placed.output_z)}")
     with Verifier() as v:
-        verdict = v.evaluate(Grid.from_tokens(tokens), placed)
+        verdict = v.evaluate(grid, placed)
     print(verdict)
     return 0 if verdict.is_pass() else 1
+
+
+def cmd_power(args) -> int:
+    """Show where the signal actually goes, one input assignment at a time."""
+    from . import vocab as V
+    from .render import power_layer
+
+    spec = _read_spec(args.spec)
+    grid, placed = _load_layout(spec, Path(args.layout))
+    assignments = (
+        [args.inputs] if args.inputs is not None else list(range(1 << spec.n_inputs))
+    )
+
+    with Verifier() as v:
+        for mask in assignments:
+            field = v.power(grid, placed, mask)
+            bits = " ".join(
+                f"{name}={mask >> k & 1}" for k, name in enumerate(spec.inputs)
+            )
+            lit = " ".join(
+                f"{name}={field.outputs >> j & 1}" for j, name in enumerate(spec.outputs)
+            )
+            state = "settled" if field.settled else "UNSETTLED"
+            print(f"\n{bits}  ->  {lit}   ({state} after {field.game_ticks} game ticks)")
+            print(power_layer(grid.tokens(), field.dust, args.layer))
+    print(
+        f"\nStrengths decay one step per block, so a run reaching 0 within "
+        f"{V.SZ} cells of its source wanted a repeater."
+    )
+    return 0
 
 
 def _placement_from_grid(spec: Spec, grid):
@@ -674,6 +704,13 @@ def main(argv=None) -> int:
     p.add_argument("spec")
     p.add_argument("grid", help="a .json layout, or a .schem from anywhere")
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("power", help="show where the signal goes")
+    p.add_argument("spec", help="spec source, or a path to a file containing one")
+    p.add_argument("layout", help="a .json layout or a .schem")
+    p.add_argument("--inputs", type=int, help="one assignment as a bitmask (default: all)")
+    p.add_argument("--layer", type=int, default=None, help="which y layer to draw")
+    p.set_defaults(func=cmd_power)
 
     p = sub.add_parser("corpus", help="build a training corpus")
     p.add_argument("out")

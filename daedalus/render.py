@@ -136,3 +136,41 @@ def palette() -> dict:
             "state": cell.state,
         }
     return out
+
+
+def power_colour(level: int) -> str:
+    """Colour for one dust strength, ``0..=15``."""
+    ramp = (
+        "#3A424C", "#5A1A17", "#6B1D1A", "#7C201C", "#8D231F", "#9E2621",
+        "#AF2924", "#C02C26", "#D12F29", "#E2322B", "#F0392C", "#F44C40",
+        "#F76054", "#FA7368", "#FC877C", "#FF9B90",
+    )
+    return ramp[max(0, min(int(level), 15))]
+
+
+#: Digits for strength in a terminal or plain-text view. Zero reads as a dot
+#: so an unpowered run is still visibly a run.
+POWER_GLYPHS = "·123456789ABCDEF"
+
+
+def power_layer(tokens, dust, y: int | None = None) -> str:
+    """One layer drawn as signal strengths rather than block kinds.
+
+    Non-dust blocks keep their ordinary glyph, so the circuit stays readable
+    around the numbers; dust shows its strength in hex.
+    """
+    if y is None:
+        y = V.LOGIC_Y
+    rows = []
+    for z in range(V.SZ):
+        row = []
+        for x in range(V.SX):
+            i = V.index(x, y, z)
+            token = tokens[i]
+            if token == V.WIRE:
+                row.append(POWER_GLYPHS[max(0, min(dust[i], 15))])
+            else:
+                row.append(describe(token, x, y, z).glyph.strip() or ".")
+            row.append(" ")
+        rows.append("".join(row).rstrip())
+    return "\n".join(rows)

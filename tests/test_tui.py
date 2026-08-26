@@ -268,3 +268,34 @@ class TestLayers:
             await pilot.press("[")
             await compile_in(pilot, "inputs A\noutputs Q\nQ = @")
             assert pilot.app.query_one("#grid", GridView).y == V.LOGIC_Y
+
+
+class TestPowerRendering:
+    def test_strength_is_drawn_where_dust_is(self):
+        tokens = [V.AIR] * V.CELLS
+        dust = [0] * V.CELLS
+        for x in range(4):
+            tokens[V.index(x, V.LOGIC_Y, 2)] = V.WIRE
+            dust[V.index(x, V.LOGIC_Y, 2)] = 15 - x
+        text = render.power_layer(tokens, dust)
+        assert text.splitlines()[2].startswith("F E D C")
+
+    def test_unpowered_dust_still_reads_as_dust(self):
+        # A run at zero is the interesting case -- it is where the signal ran
+        # out -- so it has to stay visible rather than blend into empty space.
+        tokens = [V.AIR] * V.CELLS
+        tokens[V.index(0, V.LOGIC_Y, 0)] = V.WIRE
+        text = render.power_layer(tokens, [0] * V.CELLS)
+        assert text.splitlines()[0].startswith("·")
+
+    def test_non_dust_blocks_keep_their_own_glyph(self):
+        tokens = [V.AIR] * V.CELLS
+        tokens[V.index(0, V.LOGIC_Y, 0)] = V.LAMP
+        text = render.power_layer(tokens, [0] * V.CELLS)
+        assert text.splitlines()[0][0] == render.KIND_GLYPH["lamp"]
+
+    def test_the_ramp_covers_every_strength(self):
+        seen = {render.power_colour(level) for level in range(16)}
+        assert len(seen) == 16
+        assert render.power_colour(99) == render.power_colour(15)
+        assert render.power_colour(-1) == render.power_colour(0)

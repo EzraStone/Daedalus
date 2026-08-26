@@ -209,3 +209,24 @@ class TestVerifyASchematic:
         main(["compile", NAND, "--out", str(out), "--attempts", "30"])
         with pytest.raises(SystemExit, match="input"):
             main(["verify", "inputs A B C\noutputs Q\nQ = A & B & C", str(out)])
+
+
+class TestPower:
+    def test_it_draws_a_layer_per_assignment(self, tmp_path, capsys):
+        layout = tmp_path / "p.json"
+        main(["compile", NAND, "--out", str(layout), "--attempts", "30"])
+        capsys.readouterr()
+        assert main(["power", NAND, str(layout)]) == 0
+        out = capsys.readouterr().out
+        # One block per row of the truth table.
+        assert out.count("game ticks") == 4
+        assert "A=1 B=1  ->  Q=0" in out
+
+    def test_a_single_assignment_can_be_asked_for(self, tmp_path, capsys):
+        layout = tmp_path / "p.json"
+        main(["compile", NAND, "--out", str(layout), "--attempts", "30"])
+        capsys.readouterr()
+        main(["power", NAND, str(layout), "--inputs", "3"])
+        out = capsys.readouterr().out
+        assert out.count("game ticks") == 1
+        assert "A=1 B=1" in out
