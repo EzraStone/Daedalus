@@ -111,14 +111,34 @@ def compile_attempts(
             stats.routed += 1
             yield Attempt(grid, verdict, placed, "ok")
             return
-        stats.note("verify")
+
+        # A circuit that computes the right function and is merely too big is
+        # not the same failure as one that computes the wrong thing, and
+        # calling both "verify" tells the caller to go looking in the wrong
+        # place. The first is a budget the placer was never told about; the
+        # second is a bug in the layout.
+        stage = "constraint" if _constraint_only(verdict) else "verify"
+        stats.note(stage)
         produced = True
-        yield Attempt(grid, verdict, placed, "verify", str(verdict))
+        yield Attempt(grid, verdict, placed, stage, str(verdict))
 
     if not produced:
         # `attempts <= 0`. Reported rather than returning an empty stream, so a
         # caller that misconfigures the retry budget sees why nothing happened.
         yield Attempt(None, None, None, "placement", "no attempt got as far as routing")
+
+
+def _constraint_only(verdict) -> bool:
+    """Did the circuit work, and only miss a declared budget?
+
+    A ``Fail`` carrying a constraint but no mismatched rows means every row of
+    the truth table came out right and the layout was simply too slow, too
+    large, or too wide.
+    """
+    return (
+        getattr(verdict, "constraint", None) is not None
+        and not getattr(verdict, "mismatched_rows", ())
+    )
 
 
 def compile(  # noqa: A001 - the domain word is the right one here

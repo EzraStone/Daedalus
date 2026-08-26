@@ -186,6 +186,13 @@ def _scope_hint(stage: str) -> str | None:
             "seven-cell bridge, so more attempts or another seed can help; dense "
             "layouts may still exceed the 16x6x16 build volume."
         )
+    if stage == "constraint":
+        return (
+            "The circuit computes the right function but misses a budget the "
+            "spec declared. The placer does not aim for latency or size yet, so "
+            "it is rerolling and hoping -- loosen the constraint, or raise the "
+            "attempt count."
+        )
     if stage == "netlist":
         return "The spec is outside the v1 primitive set entirely."
     if stage == "verify":

@@ -14,7 +14,7 @@ import pytest
 from daedalus import vocab as V
 from daedalus.redsim import Pass, Verifier
 from daedalus.spec import Spec
-from daedalus.synth import compile, compile_many
+from daedalus.synth import compile, compile_attempts, compile_many
 from daedalus.synth.library import load
 from daedalus.synth.netlist import MAX_FANOUT, NetlistError, compile_netlist, to_nor_form
 from daedalus.synth.place import Stats
@@ -206,3 +206,34 @@ class TestNetlistErrors:
         )
         with pytest.raises(NetlistError, match="three free faces|more than"):
             compile_netlist(spec)
+
+
+class TestConstraintReporting:
+    """A missed budget and a broken circuit are different failures."""
+
+    def test_a_circuit_that_only_misses_a_budget_is_not_called_broken(self, verifier):
+        # It computes the right function. Reporting that as "verify" sends
+        # someone looking for a layout bug that is not there.
+        source = "inputs A B C\noutputs Q\nQ = !(A & B) | C\nfootprint <= 30"
+        stages = set()
+        for attempt in compile_attempts(Spec.parse(source), verifier, random.Random(0), 25):
+            stages.add(attempt.stage)
+            if attempt.ok:
+                break
+        assert "constraint" in stages
+
+    def test_an_unconstrained_spec_never_reports_a_constraint_failure(self, verifier):
+        source = "inputs A B\noutputs Q\nQ = !(A & B)"
+        for attempt in compile_attempts(Spec.parse(source), verifier, random.Random(0), 20):
+            assert attempt.stage != "constraint"
+            if attempt.ok:
+                break
+
+    def test_the_classifier_needs_a_clean_truth_table(self):
+        from daedalus.redsim import Fail, RowMismatch
+        from daedalus.synth import _constraint_only
+
+        assert _constraint_only(Fail((), "footprint"))
+        # Wrong rows *and* over budget is a broken circuit, not a tight one.
+        assert not _constraint_only(Fail((RowMismatch(0, 0, 1),), "footprint"))
+        assert not _constraint_only(Fail((RowMismatch(0, 0, 1),), None))
