@@ -99,7 +99,29 @@ python -m daedalus verify specs/nand.txt nand.json
 python -m daedalus corpus data/ --scale 0.1
 python -m daedalus baselines --specs 25
 python -m daedalus bench                # verifier throughput
+python -m daedalus power specs/nand.txt nand.json   # where the signal goes
 ```
+
+### Seeing why, not just whether
+
+A verdict says a circuit is wrong. It does not say where the signal died,
+which is the question anyone staring at a layout is actually asking. `power`
+settles the circuit for each row of the truth table and draws dust as its
+strength:
+
+```
+A=0 B=0  ->  Q=1   (settled after 2 game ticks)
+. . . D C B A . . . . . . . . .
+. . . E . . 9 9 8 7 6 5 4 3 ▶ ◍
+. . . F ◆ . . A . . . . . . . .
+⌐ . · · · · . C . . . . . . . .
+```
+
+The decay is the diagnostic. Redstone loses a step of strength per block, so
+`F` down to `3` across thirteen cells and then a repeater lifting it back up
+is a working run — and a run that reaches `0` before it arrives is a routing
+bug you can see rather than infer. Both windows draw the same field: press
+`p` in the terminal, or use the signal row on the page.
 
 ### Training
 

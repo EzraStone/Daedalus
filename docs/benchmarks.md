@@ -111,6 +111,13 @@ undiagnosed regression, and separately ruled out the gate-spreading change in
 and an intermediate value 1.49%). That ruling-out stands; the regression
 framing does not.
 
+## Signal probing
+
+`daedalus power` settles a circuit for one input assignment and returns the
+dust strength of every cell. It costs one settle, so it is the same order as
+a single verdict rather than a batch of them -- fine interactively, and not
+something to put in a loop over a corpus.
+
 ## What is not measured
 
 - **sim↔game agreement.** The number that would make any of the above
