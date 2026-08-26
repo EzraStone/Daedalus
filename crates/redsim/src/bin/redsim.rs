@@ -23,13 +23,18 @@ use std::io::{self, BufWriter, Read, Write};
 
 use redsim::grid::CELLS;
 use redsim::spec::{Constraints, Port};
-use redsim::verdict::{ConstraintViolation, MalformedReason};
-use redsim::{evaluate_batch, Pos, Spec, Verdict};
+use redsim::verdict::{check_malformed, ConstraintViolation, MalformedReason};
+use redsim::{evaluate_batch, Circuit, Grid, Pos, Settle, Sim, Spec, Verdict,
+             DEFAULT_MAX_GAME_TICKS};
 
 const MAGIC_REQ: &[u8; 4] = b"RSIM";
 const MAGIC_RESP: &[u8; 4] = b"RSOK";
 const PROTOCOL_VERSION: u8 = 2;
 const OP_EVALUATE: u8 = 1;
+/// Dump the settled power field for one input assignment. The verdict says
+/// whether a circuit works; this says why, which is what a person staring at a
+/// layout actually wants to know.
+const OP_POWER: u8 = 2;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -79,11 +84,21 @@ fn serve() -> io::Result<()> {
             ));
         }
         let op = read_u8(&mut r)?;
-        if op != OP_EVALUATE {
+        if op != OP_EVALUATE && op != OP_POWER {
             return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown op {op}")));
         }
 
         let spec = read_spec(&mut r)?;
+
+        if op == OP_POWER {
+            let assignment = read_u64(&mut r)?;
+            let mut buf = vec![0u8; CELLS];
+            r.read_exact(&mut buf)?;
+            write_power(&mut w, &buf, &spec, assignment)?;
+            w.flush()?;
+            continue;
+        }
+
         let n = read_u32(&mut r)? as usize;
         let mut grids = Vec::with_capacity(n);
         for _ in 0..n {
@@ -335,4 +350,56 @@ fn selftest() {
         std::process::exit(1);
     }
     println!("selftest ok");
+}
+
+/// Settle the circuit with one input assignment applied, and report the power
+/// field it came to rest in.
+///
+/// A verdict tells you a circuit is wrong. It does not tell you where the
+/// signal stopped, which is the question anyone looking at a broken layout is
+/// actually asking. The levels are already computed on the way to every
+/// verdict; this just stops throwing them away.
+///
+/// ```text
+/// response := "RSOK" u8:status u8:settled u32:ticks u64:outputs (u8:dust)*
+/// ```
+/// `status` is 0 for a field, 1 for a grid too malformed to simulate.
+fn write_power<W: Write>(w: &mut W, cells: &[u8], spec: &Spec, assignment: u64) -> io::Result<()> {
+    let grid = match Grid::from_tokens(cells) {
+        Ok(g) => g,
+        Err(_) => {
+            w.write_all(MAGIC_RESP)?;
+            return w.write_all(&[1]);
+        }
+    };
+    if check_malformed(&grid, spec).is_some() {
+        w.write_all(MAGIC_RESP)?;
+        return w.write_all(&[1]);
+    }
+
+    let mut sim = Sim::new(Circuit::new(grid));
+    sim.reset(false);
+    for (k, port) in spec.inputs.iter().enumerate() {
+        sim.set_lever(port.pos, assignment >> k & 1 == 1);
+    }
+    let settle = sim.settle(DEFAULT_MAX_GAME_TICKS);
+    let (settled, ticks) = match settle {
+        Settle::Settled { game_ticks } => (1u8, game_ticks),
+        Settle::Oscillating { period_gt } => (0, period_gt),
+        Settle::Timeout { game_ticks } => (0, game_ticks),
+        _ => (0, 0),
+    };
+
+    let mut outputs = 0u64;
+    for (j, port) in spec.outputs.iter().enumerate() {
+        if sim.lamp_lit(port.pos) {
+            outputs |= 1 << j;
+        }
+    }
+
+    w.write_all(MAGIC_RESP)?;
+    w.write_all(&[0, settled])?;
+    w.write_all(&ticks.to_le_bytes())?;
+    w.write_all(&outputs.to_le_bytes())?;
+    w.write_all(&sim.levels().dust)
 }

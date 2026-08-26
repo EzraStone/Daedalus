@@ -32,6 +32,7 @@ MAGIC_REQ = b"RSIM"
 MAGIC_RESP = b"RSOK"
 PROTOCOL_VERSION = 2
 OP_EVALUATE = 1
+OP_POWER = 2
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -145,6 +146,27 @@ class Malformed:
 
     def mismatch_count(self) -> int:
         return 1 << 30
+
+
+@dataclass(frozen=True, slots=True)
+class PowerField:
+    """The settled signal strengths for one input assignment.
+
+    ``dust`` is one strength per cell, ``0..=15``, and zero anywhere that is
+    not dust. The interesting reading is not the number itself but where it
+    reaches zero: dust loses a step of strength per block, so a run that goes
+    dark fifteen cells from its source needed a repeater.
+    """
+
+    dust: list[int]
+    settled: bool
+    game_ticks: int
+    #: Which output lamps came on, as a bitmask over the declared outputs.
+    outputs: int
+
+    def reach(self) -> int:
+        """How many cells are carrying any signal at all."""
+        return sum(1 for level in self.dust if level)
 
 
 Verdict = Pass | Fail | Unstable | Malformed
@@ -326,6 +348,36 @@ class Verifier:
 
     def evaluate(self, grid, spec) -> Verdict:
         return self.evaluate_batch([grid], spec)[0]
+
+    def power(self, grid, spec, assignment: int = 0) -> PowerField:
+        """Settle the circuit with one input assignment and read the levels.
+
+        A verdict says a circuit is wrong. This says *where the signal
+        stopped*, which is the question anyone looking at a broken layout is
+        actually asking. The simulator computes these levels on the way to
+        every verdict already; this stops discarding them.
+
+        ``assignment`` is a bitmask over the declared inputs, in order.
+        """
+        self.start()
+        req = bytearray(MAGIC_REQ)
+        req += bytes([PROTOCOL_VERSION, OP_POWER])
+        req += _encode_spec(spec)
+        req += struct.pack("<Q", assignment)
+        req += _as_payload(grid)
+        self._write(bytes(req))
+
+        magic = self._read_exact(4)
+        if magic != MAGIC_RESP:
+            raise VerifierError(f"bad response magic {magic!r}")
+        status = self._read_exact(1)[0]
+        if status:
+            raise VerifierError("this grid is too malformed to simulate")
+        settled = bool(self._read_exact(1)[0])
+        (ticks,) = struct.unpack("<I", self._read_exact(4))
+        (outputs,) = struct.unpack("<Q", self._read_exact(8))
+        dust = list(self._read_exact(CELLS))
+        return PowerField(dust=dust, settled=settled, game_ticks=ticks, outputs=outputs)
 
     def _read_verdict(self) -> Verdict:
         kind = self._read_exact(1)[0]

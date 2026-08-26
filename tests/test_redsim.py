@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from daedalus import vocab as V
 from daedalus.redsim import Verifier, VerifierError, _target_binaries
 
 
@@ -119,3 +120,71 @@ class TestConstraintDetail:
         from daedalus.redsim import Fail, RowMismatch
 
         assert Fail((RowMismatch(0, 0, 1),), None).overshoot() is None
+
+
+class TestPowerField:
+    """Reading the settled signal, not just the verdict."""
+
+    def build(self):
+        import random
+
+        from daedalus.spec import Spec
+        from daedalus.synth import compile as compile_spec
+
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)")
+        with Verifier() as v:
+            attempt = compile_spec(spec, v, random.Random(0), attempts=30)
+            assert attempt.ok
+            return attempt
+
+    def test_the_field_agrees_with_the_truth_table(self):
+        # If the levels disagreed with the verdict they would be describing a
+        # different circuit, and the whole point is to explain this one.
+        attempt = self.build()
+        with Verifier() as v:
+            got = [v.power(attempt.grid, attempt.placed, m).outputs for m in range(4)]
+        assert got == [1, 1, 1, 0]
+
+    def test_dust_strength_never_exceeds_fifteen(self):
+        attempt = self.build()
+        with Verifier() as v:
+            field = v.power(attempt.grid, attempt.placed, 0)
+        assert len(field.dust) == V.CELLS
+        assert all(0 <= level <= 15 for level in field.dust)
+
+    def test_only_dust_cells_carry_a_level(self):
+        attempt = self.build()
+        tokens = attempt.grid.tokens()
+        with Verifier() as v:
+            field = v.power(attempt.grid, attempt.placed, 3)
+        for i, level in enumerate(field.dust):
+            if level:
+                assert tokens[i] == V.WIRE, V.unindex(i)
+
+    def test_turning_the_output_off_lights_less_of_the_circuit(self):
+        # The reading that makes this worth having: where the signal stopped.
+        attempt = self.build()
+        with Verifier() as v:
+            on = v.power(attempt.grid, attempt.placed, 0)
+            off = v.power(attempt.grid, attempt.placed, 3)
+        assert on.outputs == 1 and off.outputs == 0
+        assert off.reach() < on.reach()
+
+    def test_a_working_circuit_settles(self):
+        attempt = self.build()
+        with Verifier() as v:
+            field = v.power(attempt.grid, attempt.placed, 0)
+        assert field.settled
+        assert field.game_ticks > 0
+
+    def test_a_grid_that_cannot_be_simulated_says_so(self):
+        import pytest as _pytest
+
+        from daedalus.grid import Grid
+
+        attempt = self.build()
+        broken = Grid.from_tokens(attempt.grid.tokens())
+        broken.set(3, V.LOGIC_Y, 3, V.WIRE)  # dust with nothing under it
+        broken.set(3, V.SUBSTRATE_Y, 3, V.AIR)
+        with Verifier() as v, _pytest.raises(VerifierError, match="malformed"):
+            v.power(broken, attempt.placed, 0)
