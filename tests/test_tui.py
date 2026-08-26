@@ -299,3 +299,57 @@ class TestPowerRendering:
         assert len(seen) == 16
         assert render.power_colour(99) == render.power_colour(15)
         assert render.power_colour(-1) == render.power_colour(0)
+
+
+class TestSignalView:
+    """Cycling the truth table's rows as power fields."""
+
+    @pytest.mark.asyncio
+    async def test_pressing_p_shows_the_first_row(self):
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, NAND)
+            assert pilot.app.query_one("#grid", GridView).dust is None
+            await pilot.press("p")
+            await pilot.pause()
+            dust = pilot.app.query_one("#grid", GridView).dust
+            assert dust is not None and len(dust) == V.CELLS
+            assert any(dust), "a working NAND carries signal on its first row"
+
+    @pytest.mark.asyncio
+    async def test_cycling_past_the_last_row_turns_it_off(self):
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, NAND)
+            for _ in range(1 << 2):  # four rows
+                await pilot.press("p")
+                await pilot.pause()
+            await pilot.press("p")
+            await pilot.pause()
+            assert pilot.app.query_one("#grid", GridView).dust is None
+
+    @pytest.mark.asyncio
+    async def test_a_new_run_clears_the_signal_view(self):
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, NAND)
+            await pilot.press("p")
+            await pilot.pause()
+            await compile_in(pilot, NAND)
+            assert pilot.app.query_one("#grid", GridView).dust is None
+
+    @pytest.mark.asyncio
+    async def test_probing_with_nothing_verified_says_so(self):
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, XOR, attempts="3")
+            assert not pilot.app.result.ok
+            await pilot.press("p")
+            await pilot.pause()
+            assert pilot.app.query_one("#grid", GridView).dust is None
+
+    @pytest.mark.asyncio
+    async def test_the_grid_draws_strengths_once_probing(self):
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, NAND)
+            await pilot.press("p")
+            await pilot.pause()
+            text = str(pilot.app.query_one("#grid", GridView).render())
+            # Hex strengths appear only in the signal view.
+            assert any(ch in text for ch in "9ABCDEF")

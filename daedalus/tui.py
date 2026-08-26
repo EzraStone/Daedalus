@@ -104,6 +104,8 @@ class Result:
     tokens: list[int] | None = None
     verdict: str = ""
     ok: bool = False
+    #: Kept so the signal view can ask the verifier about this exact circuit.
+    placed: object = None
 
 
 class GridView(Static):
@@ -122,13 +124,25 @@ class GridView(Static):
 
     tokens: reactive[list[int] | None] = reactive(None, layout=True)
     y: reactive[int] = reactive(V.LOGIC_Y, layout=True)
+    #: Dust strengths for one input assignment, or None to draw block kinds.
+    dust: reactive[list[int] | None] = reactive(None, layout=True)
 
     def render(self) -> Text:
         if not self.tokens:
             return Text("no layout — nothing was routed for this spec", style="dim")
         out = Text()
-        for row in render.layer(self.tokens, self.y):
-            for cell in row:
+        for z, row in enumerate(render.layer(self.tokens, self.y)):
+            for x, cell in enumerate(row):
+                if self.dust is not None and cell.kind == "wire":
+                    # Strength in place of the glyph, coloured along the ramp.
+                    # Where it reaches zero is where the circuit ran out of
+                    # signal, which is the whole reason to look at this view.
+                    level = self.dust[V.index(x, self.y, z)]
+                    out.append(
+                        f"{render.POWER_GLYPHS[max(0, min(level, 15))]} ",
+                        style=f"{render.power_colour(level)} on {cell.background}",
+                    )
+                    continue
                 out.append(
                     f"{cell.glyph} ", style=f"{cell.foreground} on {cell.background}"
                 )
@@ -232,6 +246,8 @@ class DaedalusApp(App):
         # is not visible at all from the logic layer alone.
         ("[", "layer_down", "Layer -"),
         ("]", "layer_up", "Layer +"),
+        # A verdict says a circuit is wrong; this says where the signal died.
+        ("p", "power", "Signal"),
         ("ctrl+q", "quit", "Quit"),
     ]
 
@@ -242,6 +258,7 @@ class DaedalusApp(App):
         super().__init__(**kwargs)
         self.examples = load_examples()
         self.result = Result()
+        self._power_row: int | None = None
         self._verifier: Verifier | None = None
 
     # -- layout ------------------------------------------------------------
@@ -330,6 +347,44 @@ class DaedalusApp(App):
         i = occupied.index(current) if current in occupied else 0
         self.show_layer(occupied[max(0, min(i + delta, len(occupied) - 1))])
 
+    def action_power(self) -> None:
+        """Cycle through the truth table's rows as signal fields, then off.
+
+        The rows are the point. Watching which cells go dark between "output
+        high" and "output low" says more about what a circuit is doing than
+        any single snapshot of it.
+        """
+        grid_view = self.query_one("#grid", GridView)
+        if not self.result.ok or not self.result.tokens or self.result.placed is None:
+            self.log_line("error", "signal", "nothing verified to probe")
+            return
+
+        rows = 1 << len(self.result.placed.input_z)
+        self._power_row = 0 if self._power_row is None else self._power_row + 1
+        if self._power_row >= rows:
+            self._power_row = None
+            grid_view.dust = None
+            self.show_layer(grid_view.y)
+            return
+
+        from .grid import Grid
+
+        try:
+            field = self.verifier().power(
+                Grid.from_tokens(self.result.tokens), self.result.placed, self._power_row
+            )
+        except VerifierError as e:
+            self._power_row = None
+            self.log_line("error", "signal", str(e))
+            return
+        grid_view.dust = field.dust
+        self.show_layer(grid_view.y)
+        self.log_line(
+            "info",
+            f"signal row {self._power_row}",
+            f"outputs {field.outputs:b} · {field.reach()} cells carrying signal",
+        )
+
     def action_layer_up(self) -> None:
         self._step_layer(1)
 
@@ -343,7 +398,10 @@ class DaedalusApp(App):
         circuit on screen, reading as if the failing spec had produced it.
         """
         self.result = Result()
-        self.query_one("#grid", GridView).tokens = None
+        self._power_row = None
+        grid = self.query_one("#grid", GridView)
+        grid.tokens = None
+        grid.dust = None
         self.show_layer(V.LOGIC_Y)
         detail = self.query_one("#detail", Detail)
         detail.spec_text = ""
@@ -431,7 +489,9 @@ class DaedalusApp(App):
     def _show_attempt(self, n: int, attempt, spec: Spec) -> None:
         if attempt.ok:
             self.log_line("ok", "verified", str(attempt.verdict), n)
-            self.result = Result(attempt.grid.tokens(), str(attempt.verdict), True)
+            self.result = Result(
+                attempt.grid.tokens(), str(attempt.verdict), True, attempt.placed
+            )
             self.query_one("#grid", GridView).tokens = self.result.tokens
             self.show_layer(V.LOGIC_Y)
             self.query_one("#verdict", Verdict).show(
