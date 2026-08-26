@@ -153,3 +153,45 @@ class TestPlacement:
     def test_rejects_wrong_number_of_rows(self):
         with pytest.raises(PlacementError):
             spec("Q = A & B").place((2,), (8,))
+
+
+class TestUnsatisfiableConstraints:
+    """Budgets nothing can meet, caught before anything is built."""
+
+    def test_a_narrow_region_is_impossible_not_merely_tight(self):
+        # Levers sit on the input face and lamps on the output face, so every
+        # layout spans the full width. Any width budget under that is a spec
+        # that cannot be built, not one that needs more attempts.
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)\nregion <= 10 x 10")
+        why = spec.constraints.unsatisfiable()
+        assert why and "ports are pinned" in why
+
+    def test_a_full_width_region_is_allowed(self):
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)\nregion <= 16 x 12")
+        assert spec.constraints.unsatisfiable() is None
+
+    def test_a_footprint_below_what_the_ports_alone_need_is_impossible(self):
+        # Two blocks per input, two per output, before any wiring at all. The
+        # substrate is not part of this: material_blocks counts from y=1 up.
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)\nfootprint <= 5")
+        why = spec.constraints.unsatisfiable(spec)
+        assert why and "ports" in why
+
+    def test_an_ordinary_footprint_is_allowed(self):
+        # 60-120 is the range the corpus sampler draws from, and every one of
+        # those has to stay buildable.
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)\nfootprint <= 60")
+        assert spec.constraints.unsatisfiable(spec) is None
+
+    def test_no_constraints_is_satisfiable(self):
+        assert Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)").constraints.unsatisfiable() is None
+
+    def test_the_sampler_never_writes_an_impossible_one(self):
+        # The corpus would otherwise carry specs that burn a full retry budget
+        # and can never yield an example.
+        import random as _random
+
+        from daedalus.data import sample_unique
+
+        for spec in sample_unique(_random.Random(0), 40):
+            assert spec.constraints.unsatisfiable(spec) is None, spec.source()

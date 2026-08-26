@@ -79,6 +79,16 @@ def compile_attempts(
     rng = rng or random.Random()
     stats = stats if stats is not None else Stats()
 
+    impossible = spec.constraints.unsatisfiable(spec)
+    if impossible:
+        # Ask before building anything. Otherwise this spends the whole retry
+        # budget and reports what an unlucky run reports, so a spec that cannot
+        # be built looks like one that merely was not built this time.
+        stats.attempts += 1
+        stats.note("constraint")
+        yield Attempt(None, None, None, "constraint", impossible)
+        return
+
     try:
         netlist = compile_netlist(spec)
     except NetlistError as e:

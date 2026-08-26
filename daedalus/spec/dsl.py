@@ -191,6 +191,50 @@ class Constraints:
             out.append(f"region <= {self.max_region[0]} x {self.max_region[1]}")
         return out
 
+    def unsatisfiable(self, spec=None) -> str | None:
+        """Why no layout could ever meet these, if that is the case.
+
+        Worth asking before building anything. A budget nothing can satisfy
+        otherwise consumes the whole retry allowance and reports the same
+        thing a merely unlucky run does, so the answer looks like bad luck
+        rather than a spec that cannot be built.
+
+        Pass ``spec`` for the checks that depend on how many ports there are.
+        The footprint floor is *not* the substrate: `material_blocks` counts
+        from ``y = 1`` up, so the floor a layout stands on is free.
+        """
+        from .. import vocab as V
+
+        if self.max_region is not None:
+            width, depth = self.max_region
+            # Levers sit on the input face and lamps on the output face, so
+            # every layout spans the full width of the build volume. A width
+            # budget under that is not tight, it is impossible.
+            if width < V.SX:
+                return (
+                    f"region width {width} is below {V.SX}: ports are pinned to "
+                    f"x=0 and x={V.SX - 1}, so every layout spans the full width"
+                )
+            if depth < 1:
+                return f"region depth {depth} leaves no room for a circuit"
+        if self.max_latency_rt is not None and self.max_latency_rt < 0:
+            return "latency budget is negative"
+        if self.max_blocks is not None:
+            if self.max_blocks < 1:
+                return f"footprint {self.max_blocks} leaves no room for a circuit"
+            if spec is not None:
+                # Every input needs a lever and the block it hangs on; every
+                # output needs a lamp and the repeater driving it. That is the
+                # floor before a single wire is routed.
+                floor = 2 * spec.n_inputs + 2 * spec.n_outputs
+                if self.max_blocks < floor:
+                    return (
+                        f"footprint {self.max_blocks} is below the {floor} blocks "
+                        f"{spec.n_inputs} input and {spec.n_outputs} output ports "
+                        "need before any wiring"
+                    )
+        return None
+
 
 # --------------------------------------------------------------------------
 # lexer
