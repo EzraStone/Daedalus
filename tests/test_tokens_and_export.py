@@ -223,3 +223,96 @@ class TestNbtReading:
 
         with _pytest.raises(NbtError):
             read_varints(b"\x80")
+
+
+class TestStateParsing:
+    """Minecraft block-state strings back into tokens."""
+
+    def test_every_token_survives_its_own_state_string(self):
+        # The inverse is derived from state_string rather than restated, so
+        # this is what guarantees the two cannot drift apart.
+        for token in V.BLOCK_TOKENS:
+            assert V.from_state(V.state_string(token)) == token, token
+
+    def test_signal_properties_are_ignored(self):
+        # A circuit pulled out of a running world has power in it. That is
+        # state the simulator works out for itself, not part of the identity
+        # of the block -- keeping it would multiply the vocabulary by sixteen.
+        assert V.from_state("minecraft:redstone_wire[power=15]") == V.WIRE
+        assert V.from_state("minecraft:redstone_lamp[lit=true]") == V.LAMP
+        assert V.from_state("minecraft:repeater[facing=north,delay=2,locked=true,powered=true]") == (
+            V.repeater(V.Dir4.SOUTH, 2)
+        )
+
+    def test_a_block_outside_the_vocabulary_is_refused(self):
+        with pytest.raises(V.UnknownBlock):
+            V.from_state("minecraft:piston[facing=up]")
+
+    def test_properties_split_cleanly(self):
+        name, props = V.parse_state("minecraft:repeater[facing=north,delay=3]")
+        assert name == "minecraft:repeater"
+        assert props == {"facing": "north", "delay": "3"}
+
+    def test_a_bare_name_has_no_properties(self):
+        assert V.parse_state("minecraft:stone") == ("minecraft:stone", {})
+
+
+class TestSchematicRoundTrip:
+    def test_a_written_schematic_reads_back_identical(self, tmp_path):
+        from daedalus.schematic import read_schem
+
+        grid = Grid.with_substrate()
+        grid.set(4, 1, 4, V.WIRE)
+        grid.set(5, 1, 4, V.torch(V.Attach.WEST))
+        grid.set(6, 1, 4, V.repeater(V.Dir4.EAST, 3))
+        grid.set(7, 1, 4, V.comparator(V.Dir4.EAST, True))
+        path = write_schem(grid, tmp_path / "c.schem")
+        assert read_schem(path).tokens() == grid.tokens()
+
+    def test_a_schematic_bigger_than_the_build_volume_is_refused(self, tmp_path):
+        from daedalus.schematic import SchematicError, read_schem
+        from daedalus.schematic.nbt import ByteArray, Int, Short, dumps
+
+        blob = dumps(
+            {
+                "Width": Short(64),
+                "Height": Short(V.SY),
+                "Length": Short(V.SZ),
+                "Palette": {"minecraft:air": Int(0)},
+                "BlockData": ByteArray(b"\x00"),
+            },
+            "Schematic",
+        )
+        path = tmp_path / "big.schem"
+        path.write_bytes(blob)
+        with pytest.raises(SchematicError, match="larger than"):
+            read_schem(path)
+
+    def test_a_truncated_block_run_is_refused(self, tmp_path):
+        from daedalus.schematic import SchematicError, read_schem
+        from daedalus.schematic.nbt import ByteArray, Int, Short, dumps
+
+        path = tmp_path / "short.schem"
+        path.write_bytes(
+            dumps(
+                {
+                    "Width": Short(V.SX),
+                    "Height": Short(V.SY),
+                    "Length": Short(V.SZ),
+                    "Palette": {"minecraft:air": Int(0)},
+                    "BlockData": ByteArray(b"\x00\x00"),
+                },
+                "Schematic",
+            )
+        )
+        with pytest.raises(SchematicError, match="expected"):
+            read_schem(path)
+
+    def test_a_missing_field_says_which_one(self, tmp_path):
+        from daedalus.schematic import SchematicError, read_schem
+        from daedalus.schematic.nbt import Short, dumps
+
+        path = tmp_path / "bad.schem"
+        path.write_bytes(dumps({"Width": Short(V.SX)}, "Schematic"))
+        with pytest.raises(SchematicError, match="Height"):
+            read_schem(path)

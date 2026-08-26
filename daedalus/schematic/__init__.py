@@ -30,6 +30,8 @@ from .nbt import (
     Short,
     String,
     dumps,
+    loads,
+    read_varints,
     varint,
 )
 
@@ -194,3 +196,56 @@ def block_summary(grid: Grid) -> dict[str, int]:
         kind = V.decode(token).kind
         counts[kind] = counts.get(kind, 0) + 1
     return dict(sorted(counts.items()))
+
+
+# --------------------------------------------------------------------------
+# reading
+# --------------------------------------------------------------------------
+
+
+class SchematicError(ValueError):
+    """The file was not a schematic this can turn into a grid."""
+
+
+def read_schem(path: str | Path) -> Grid:
+    """Read a Sponge schematic v2 back into a :class:`Grid`.
+
+    The point is the round trip. Without a reader an exported circuit is a
+    one-way trip, and the obvious workflow -- build it, open it in the game,
+    fix it by hand, ask the verifier what changed -- is not available.
+
+    Schematics smaller than the build volume are accepted and placed at their
+    origin, since a circuit exported from a selection in-game is usually
+    trimmed. Anything larger is refused rather than silently cropped.
+    """
+    _name, root = loads(Path(path).read_bytes())
+    for key in ("Width", "Height", "Length", "Palette", "BlockData"):
+        if key not in root:
+            raise SchematicError(f"schematic has no {key}")
+
+    width, height, length = root["Width"], root["Height"], root["Length"]
+    if width > V.SX or height > V.SY or length > V.SZ:
+        raise SchematicError(
+            f"schematic is {width}x{height}x{length}, larger than the "
+            f"{V.SX}x{V.SY}x{V.SZ} build volume"
+        )
+
+    by_index = {index: state for state, index in root["Palette"].items()}
+    indices = read_varints(bytes(root["BlockData"]))
+    expected = width * height * length
+    if len(indices) != expected:
+        raise SchematicError(f"expected {expected} blocks, found {len(indices)}")
+
+    grid = Grid()
+    for i, index in enumerate(indices):
+        state = by_index.get(index)
+        if state is None:
+            raise SchematicError(f"block index {index} is not in the palette")
+        token = V.from_state(state)
+        if token == V.AIR:
+            continue
+        # Sponge stores y-z-x, the same order the grid uses.
+        y, rest = divmod(i, length * width)
+        z, x = divmod(rest, width)
+        grid.set(x, y, z, token)
+    return grid

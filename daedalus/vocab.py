@@ -17,6 +17,7 @@ are deliberately excluded because they are derived rather than chosen:
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -346,3 +347,62 @@ _NAME6 = {
     Dir6.UP: "up",
     Dir6.DOWN: "down",
 }
+
+
+#: Properties Minecraft carries that describe a block's *current* signal
+#: rather than its identity. A wire at power 15 and a wire at power 0 are the
+#: same block state as far as this vocabulary is concerned -- the simulator
+#: works the power out for itself, and keeping it in the token would multiply
+#: the vocabulary by sixteen for nothing.
+DYNAMIC_PROPERTIES = frozenset({"power", "lit", "powered", "locked"})
+
+
+def parse_state(state: str) -> tuple[str, dict[str, str]]:
+    """Split ``minecraft:name[k=v,...]`` into its name and properties."""
+    state = state.strip()
+    name, _, rest = state.partition("[")
+    props: dict[str, str] = {}
+    if rest:
+        for pair in rest.rstrip("]").split(","):
+            if not pair:
+                continue
+            key, _, value = pair.partition("=")
+            props[key.strip()] = value.strip()
+    return name.strip(), props
+
+
+def _identity(state: str) -> tuple[str, tuple[tuple[str, str], ...]]:
+    name, props = parse_state(state)
+    kept = {k: v for k, v in props.items() if k not in DYNAMIC_PROPERTIES}
+    return name, tuple(sorted(kept.items()))
+
+
+@functools.lru_cache(maxsize=1)
+def _states_to_tokens() -> dict[tuple[str, tuple[tuple[str, str], ...]], int]:
+    """Reverse of :func:`state_string`, derived from it rather than restated.
+
+    Writing the inverse by hand would be a second copy of the mapping, free to
+    drift from the first. Building it by running the forward direction over
+    every token cannot.
+    """
+    out = {}
+    for token in BLOCK_TOKENS:
+        out.setdefault(_identity(state_string(token)), token)
+    return out
+
+
+class UnknownBlock(ValueError):
+    """A block state outside the 48-token vocabulary."""
+
+
+def from_state(state: str) -> int:
+    """Turn a Minecraft block-state string back into a token.
+
+    Signal-carrying properties are ignored, so a wire someone left powered in
+    a running world reads back as the same wire.
+    """
+    key = _identity(state)
+    token = _states_to_tokens().get(key)
+    if token is None:
+        raise UnknownBlock(f"{state!r} is not in the v1 block vocabulary")
+    return token
