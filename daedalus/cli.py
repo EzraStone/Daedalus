@@ -90,7 +90,24 @@ def cmd_verify(args) -> int:
     from .grid import Grid
 
     spec = _read_spec(args.spec)
-    blob = json.loads(Path(args.grid).read_text())
+    path = Path(args.grid)
+
+    if path.suffix in (".schem", ".litematic"):
+        # A circuit that has been through the game, or through anyone's
+        # editor. Port rows are not recorded in a schematic, so the placement
+        # has to be inferred from where the levers and lamps actually are.
+        from .schematic import read_schem
+
+        grid = read_schem(path)
+        placed = _placement_from_grid(spec, grid)
+        with Verifier() as v:
+            verdict = v.evaluate(grid, placed)
+        print(f"ports: inputs at rows {list(placed.input_z)}, "
+              f"outputs at rows {list(placed.output_z)}")
+        print(verdict)
+        return 0 if verdict.is_pass() else 1
+
+    blob = json.loads(path.read_text())
 
     if isinstance(blob, dict):
         tokens = blob["tokens"]
@@ -113,6 +130,29 @@ def cmd_verify(args) -> int:
         verdict = v.evaluate(Grid.from_tokens(tokens), placed)
     print(verdict)
     return 0 if verdict.is_pass() else 1
+
+
+def _placement_from_grid(spec: Spec, grid):
+    """Recover the port rows from a grid that came in without them.
+
+    A schematic records blocks, not intent, so the only evidence of where the
+    ports were meant to be is where the levers and lamps ended up. Reading
+    them off the faces is exact when the circuit is one of ours and a clear
+    error when it is not.
+    """
+    from . import vocab as V
+
+    inputs = [z for z in range(V.SZ) if V.decode(grid.get(0, V.LOGIC_Y, z)).kind == "lever"]
+    outputs = [
+        z for z in range(V.SZ) if grid.get(V.OUTPUT_X, V.LOGIC_Y, z) == V.LAMP
+    ]
+    if len(inputs) != spec.n_inputs or len(outputs) != spec.n_outputs:
+        raise SystemExit(
+            f"this grid has {len(inputs)} lever(s) on the input face and "
+            f"{len(outputs)} lamp(s) on the output face, but the spec declares "
+            f"{spec.n_inputs} input(s) and {spec.n_outputs} output(s)"
+        )
+    return spec.place(inputs, outputs)
 
 
 def cmd_corpus(args) -> int:
@@ -632,7 +672,7 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("verify", help="check a saved grid against a spec")
     p.add_argument("spec")
-    p.add_argument("grid", help="a .json layout written by `compile --out`")
+    p.add_argument("grid", help="a .json layout, or a .schem from anywhere")
     p.set_defaults(func=cmd_verify)
 
     p = sub.add_parser("corpus", help="build a training corpus")

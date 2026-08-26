@@ -189,3 +189,23 @@ class TestVerifyRoundTrip:
         main(["verify", NAND, str(out)])
         assert "no port rows" in capsys.readouterr().err
         del placed
+
+
+class TestVerifyASchematic:
+    """A circuit that has been through the game comes back without port rows."""
+
+    def test_a_schematic_verifies_with_ports_read_off_the_faces(self, tmp_path, capsys):
+        out = tmp_path / "c.schem"
+        assert main(["compile", NAND, "--out", str(out), "--attempts", "30"]) == 0
+        assert main(["verify", NAND, str(out)]) == 0
+        printed = capsys.readouterr().out
+        assert "ports: inputs at rows" in printed
+        assert "Pass(" in printed
+
+    def test_a_spec_with_the_wrong_port_count_says_so(self, tmp_path):
+        # Verifying against the wrong spec should read as a mismatch, not as
+        # a circuit that mysteriously fails.
+        out = tmp_path / "c.schem"
+        main(["compile", NAND, "--out", str(out), "--attempts", "30"])
+        with pytest.raises(SystemExit, match="input"):
+            main(["verify", "inputs A B C\noutputs Q\nQ = A & B & C", str(out)])
