@@ -199,3 +199,97 @@ def varint(value: int) -> bytes:
         else:
             out.append(byte)
             return bytes(out)
+
+
+# --------------------------------------------------------------------------
+# reading
+# --------------------------------------------------------------------------
+
+
+class NbtError(ValueError):
+    """The bytes were not the NBT this expected."""
+
+
+def _read_string(data: bytes, i: int) -> tuple[str, int]:
+    (n,) = struct.unpack_from(">H", data, i)
+    i += 2
+    return data[i : i + n].decode("utf-8"), i + n
+
+
+def _read_payload(data: bytes, i: int, tag: int) -> tuple[Any, int]:
+    """Decode one payload, returning it and the offset just past it.
+
+    Values come back as plain Python rather than as the ``Tag`` wrappers the
+    writer takes. The wrappers exist to pin a width on the way out, which is a
+    question the bytes have already answered on the way in.
+    """
+    if tag == TAG_BYTE:
+        return struct.unpack_from(">b", data, i)[0], i + 1
+    if tag == TAG_SHORT:
+        return struct.unpack_from(">h", data, i)[0], i + 2
+    if tag == TAG_INT:
+        return struct.unpack_from(">i", data, i)[0], i + 4
+    if tag == TAG_LONG:
+        return struct.unpack_from(">q", data, i)[0], i + 8
+    if tag == TAG_FLOAT:
+        return struct.unpack_from(">f", data, i)[0], i + 4
+    if tag == TAG_DOUBLE:
+        return struct.unpack_from(">d", data, i)[0], i + 8
+    if tag == TAG_BYTE_ARRAY:
+        (n,) = struct.unpack_from(">i", data, i)
+        i += 4
+        return data[i : i + n], i + n
+    if tag == TAG_STRING:
+        return _read_string(data, i)
+    if tag == TAG_LIST:
+        element = data[i]
+        (n,) = struct.unpack_from(">i", data, i + 1)
+        i += 5
+        out = []
+        for _ in range(n):
+            value, i = _read_payload(data, i, element)
+            out.append(value)
+        return out, i
+    if tag == TAG_COMPOUND:
+        out = {}
+        while True:
+            kind = data[i]
+            i += 1
+            if kind == TAG_END:
+                return out, i
+            name, i = _read_string(data, i)
+            out[name], i = _read_payload(data, i, kind)
+    if tag in (TAG_INT_ARRAY, TAG_LONG_ARRAY):
+        width, code = (4, ">i") if tag == TAG_INT_ARRAY else (8, ">q")
+        (n,) = struct.unpack_from(">i", data, i)
+        i += 4
+        out = [struct.unpack_from(code, data, i + k * width)[0] for k in range(n)]
+        return out, i + n * width
+    raise NbtError(f"unknown NBT tag id {tag}")
+
+
+def loads(data: bytes) -> tuple[str, dict]:
+    """Parse a compound tag, gzipped or not. Returns ``(root_name, value)``."""
+    if data[:2] == b"\x1f\x8b":
+        data = gzip.decompress(data)
+    if not data or data[0] != TAG_COMPOUND:
+        raise NbtError("NBT does not start with a compound tag")
+    name, i = _read_string(data, 1)
+    value, _ = _read_payload(data, i, TAG_COMPOUND)
+    return name, value
+
+
+def read_varints(data: bytes) -> list[int]:
+    """Unpack a run of LEB128 varints, the way Sponge stores block indices."""
+    out: list[int] = []
+    value = shift = 0
+    for byte in data:
+        value |= (byte & 0x7F) << shift
+        if byte & 0x80:
+            shift += 7
+            continue
+        out.append(value)
+        value = shift = 0
+    if shift:
+        raise NbtError("varint run ended mid-value")
+    return out

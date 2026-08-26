@@ -152,3 +152,74 @@ class TestExport:
         for t in V.BLOCK_TOKENS:
             name = V.state_string(t)
             assert name.startswith("minecraft:"), t
+
+
+class TestNbtReading:
+    """The encoder had no counterpart, so nothing it wrote could be read back."""
+
+    def test_every_tag_type_survives_a_round_trip(self):
+        from daedalus.schematic.nbt import (
+            Byte,
+            ByteArray,
+            Int,
+            IntArray,
+            List,
+            LongArray,
+            Short,
+            String,
+            dumps,
+            loads,
+        )
+
+        root = {
+            "Version": Int(2),
+            "Width": Short(16),
+            "BlockData": ByteArray(b"\x01\x02\x7f"),
+            "Palette": {"minecraft:air": Int(0)},
+            "Names": List([String("a"), String("b")]),
+            "Offset": IntArray([1, 2, 3]),
+            "Packed": LongArray([1 << 40, -2]),
+            "Flag": Byte(1),
+        }
+        name, back = loads(dumps(root, "Schematic"))
+        assert name == "Schematic"
+        assert back["Version"] == 2
+        assert back["BlockData"] == b"\x01\x02\x7f"
+        assert back["Palette"] == {"minecraft:air": 0}
+        assert back["Names"] == ["a", "b"]
+        assert back["Offset"] == [1, 2, 3]
+        assert back["Packed"] == [1 << 40, -2]
+
+    def test_an_empty_list_round_trips(self):
+        from daedalus.schematic.nbt import List, dumps, loads
+
+        _name, back = loads(dumps({"BlockEntities": List([], element_id=10)}))
+        assert back["BlockEntities"] == []
+
+    def test_ungzipped_nbt_is_accepted_too(self):
+        from daedalus.schematic.nbt import Int, dumps, loads
+
+        _name, back = loads(dumps({"V": Int(1)}, "", gzipped=False))
+        assert back["V"] == 1
+
+    def test_something_that_is_not_nbt_is_refused(self):
+        import pytest as _pytest
+
+        from daedalus.schematic.nbt import NbtError, loads
+
+        with _pytest.raises(NbtError):
+            loads(b"not nbt at all")
+
+    def test_varints_round_trip_across_the_byte_boundary(self):
+        from daedalus.schematic.nbt import read_varints, varint
+
+        values = [0, 1, 127, 128, 255, 300, 16383, 16384]
+        assert read_varints(b"".join(varint(v) for v in values)) == values
+
+    def test_a_truncated_varint_is_an_error_rather_than_a_silent_zero(self):
+        import pytest as _pytest
+
+        from daedalus.schematic.nbt import NbtError, read_varints
+
+        with _pytest.raises(NbtError):
+            read_varints(b"\x80")
