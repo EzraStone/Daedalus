@@ -335,3 +335,95 @@ class TestLayers:
                 tokens[V.index(x, y, z)] != V.AIR for z in range(V.SZ) for x in range(V.SX)
             )
             assert (y in attempt["layers"]) == has, y
+
+
+class TestSignal:
+    """Reading the power field through the page."""
+
+    def compiled(self, client):
+        response = client.post(
+            "/api/compile", json={"spec_source": NAND, "attempts": 30}
+        )
+        attempt = response.json()["attempts"][-1]
+        assert attempt["ok"], attempt
+        return attempt
+
+    def test_an_attempt_carries_the_ports_it_was_built_with(self, client):
+        # Ports are re-rolled every attempt, so the spec payload's placement is
+        # a different circuit. Asking the verifier about this grid with those
+        # ports is a port violation, which is how a browser found this.
+        attempt = self.compiled(client)
+        assert "input_z" in attempt and "output_z" in attempt
+        spec = client.post("/api/compile", json={"spec_source": NAND, "attempts": 30})
+        del spec
+
+    def test_the_field_matches_the_truth_table(self, client):
+        attempt = self.compiled(client)
+        got = []
+        for row in range(4):
+            response = client.post(
+                "/api/power",
+                json={
+                    "tokens": attempt["tokens"],
+                    "input_z": attempt["input_z"],
+                    "output_z": attempt["output_z"],
+                    "spec_source": NAND,
+                    "assignment": row,
+                },
+            )
+            assert response.status_code == 200, response.text
+            got.append(response.json()["outputs"])
+        assert got == [1, 1, 1, 0]
+
+    def test_the_output_going_low_darkens_the_circuit(self, client):
+        attempt = self.compiled(client)
+
+        def reach(row):
+            return client.post(
+                "/api/power",
+                json={
+                    "tokens": attempt["tokens"],
+                    "input_z": attempt["input_z"],
+                    "output_z": attempt["output_z"],
+                    "spec_source": NAND,
+                    "assignment": row,
+                },
+            ).json()["reach"]
+
+        assert reach(3) < reach(0)
+
+    def test_port_names_come_back_with_the_field(self, client):
+        attempt = self.compiled(client)
+        body = client.post(
+            "/api/power",
+            json={
+                "tokens": attempt["tokens"],
+                "input_z": attempt["input_z"],
+                "output_z": attempt["output_z"],
+                "spec_source": NAND,
+                "assignment": 1,
+            },
+        ).json()
+        assert [p["name"] for p in body["inputs"]] == ["A", "B"]
+        assert body["inputs"][0]["on"] is True
+        assert [p["name"] for p in body["lamps"]] == ["Q"]
+
+    def test_a_bad_spec_is_a_four_hundred(self, client):
+        response = client.post(
+            "/api/power",
+            json={
+                "tokens": [0] * V.CELLS,
+                "input_z": [1],
+                "output_z": [1],
+                "spec_source": "inputs A\noutputs Q\nQ = @",
+                "assignment": 0,
+            },
+        )
+        assert response.status_code == 400
+
+    def test_the_palette_carries_the_signal_ramp(self, client):
+        # Both views colour strengths from this, so neither has to invent a
+        # gradient of its own.
+        ramp = client.get("/api/palette").json()["power_ramp"]
+        assert len(ramp) == 16
+        assert all(c.startswith("#") for c in ramp)

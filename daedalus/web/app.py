@@ -38,7 +38,7 @@ from .. import __version__
 from .. import vocab as V
 from ..grid import Grid
 from ..redsim import Verifier, VerifierError
-from ..render import LEGEND, occupied_layers
+from ..render import LEGEND, occupied_layers, power_colour
 from ..render import palette as display_palette
 from ..schematic import block_summary, write_litematic, write_schem
 from ..spec import PlacedSpec, Spec, SpecSyntaxError
@@ -118,6 +118,14 @@ class CompileRequest(BaseModel):
     attempts: int = Field(default=20, ge=1, le=MAX_ATTEMPTS)
 
 
+class PowerRequest(BaseModel):
+    tokens: list[int]
+    input_z: list[int]
+    output_z: list[int]
+    spec_source: str
+    assignment: int = 0
+
+
 class ExportRequest(BaseModel):
     tokens: list[int]
     fmt: str = Field(default="schem", pattern="^(schem|litematic)$")
@@ -162,6 +170,13 @@ def _spec_payload(parsed: Parsed) -> dict:
 
 def _attempt_payload(n: int, attempt: Attempt) -> dict:
     payload: dict = {"n": n, "stage": attempt.stage, "detail": attempt.detail, "ok": attempt.ok}
+    if attempt.placed is not None:
+        # The placement this attempt was built with, not the one the spec
+        # payload carries. Ports are re-rolled every attempt, so anything that
+        # asks the verifier about this grid has to ask about these ports --
+        # the spec's are a different circuit.
+        payload["input_z"] = list(attempt.placed.input_z)
+        payload["output_z"] = list(attempt.placed.output_z)
     if attempt.grid is not None:
         payload["tokens"] = attempt.grid.tokens()
         # A bridge puts dust on y=2 and y=3. Drawing only the logic layer hides
@@ -375,6 +390,42 @@ async def _run_stream(socket: WebSocket, request: CompileRequest) -> None:
     )
 
 
+@app.post("/api/power")
+def power(req: PowerRequest) -> JSONResponse:
+    """Settle the circuit for one input assignment and return the field.
+
+    The page can already draw what a circuit *is*. This is what it *does*:
+    which cells are carrying signal, how strong, and where it runs out.
+    """
+    try:
+        spec = Spec.parse(req.spec_source)
+    except SpecSyntaxError as e:
+        return JSONResponse({"detail": str(e)}, status_code=400)
+    placed = spec.place(req.input_z, req.output_z)
+    try:
+        with shared as verifier:
+            field = verifier.power(Grid.from_tokens(req.tokens), placed, req.assignment)
+    except (VerifierError, ValueError) as e:
+        return JSONResponse({"detail": str(e)}, status_code=400)
+    return JSONResponse(
+        {
+            "dust": field.dust,
+            "settled": field.settled,
+            "game_ticks": field.game_ticks,
+            "outputs": field.outputs,
+            "reach": field.reach(),
+            "inputs": [
+                {"name": name, "on": bool(req.assignment >> k & 1)}
+                for k, name in enumerate(spec.inputs)
+            ],
+            "lamps": [
+                {"name": name, "on": bool(field.outputs >> j & 1)}
+                for j, name in enumerate(spec.outputs)
+            ],
+        }
+    )
+
+
 @app.post("/api/export")
 def export(request: ExportRequest) -> FileResponse:
     """Write a schematic and hand it back as a download."""
@@ -411,6 +462,9 @@ def palette() -> dict:
     """
     return {
         "blocks": display_palette(),
+        # One colour per dust strength, so the page draws signal the same way
+        # the terminal does rather than inventing a second gradient.
+        "power_ramp": [power_colour(n) for n in range(16)],
         "legend": list(LEGEND),
         "geometry": {"sx": V.SX, "sy": V.SY, "sz": V.SZ, "logic_y": V.LOGIC_Y},
     }

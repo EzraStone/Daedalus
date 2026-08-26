@@ -210,6 +210,8 @@ Q = !(A &amp; B)</textarea>
     <div id="results" hidden>
       <div class="eyebrow" id="layer-caption">Layout · logic layer (y=1)</div>
       <div class="layers" id="layers"></div>
+      <div class="layers" id="signal"></div>
+      <div id="signal-note" class="empty" hidden></div>
       <div class="grid-wrap"><div id="grid"></div></div>
       <div id="no-grid" class="empty" hidden>No layout — nothing was routed for this spec.</div>
       <div class="legend" id="legend"></div>
@@ -254,12 +256,19 @@ const els = {
   canonical: $("canonical"), measurements: $("measurements"), materials: $("materials"),
   schem: $("export-schem"), litematic: $("export-litematic"), health: $("health"),
   noGrid: $("no-grid"), layers: $("layers"), layerCaption: $("layer-caption"),
+  signal: $("signal"), signalNote: $("signal-note"),
 };
 
 let palette = null;      // token id -> {kind, glyph, state}
 let geometry = null;
+let powerRamp = [];      // one colour per dust strength, from the server
 let lastTokens = null;   // the grid of the most recent PASS
 let lastLayers = null;   // which y layers that grid actually uses
+let lastPlaced = null;   // the port rows the circuit was built against
+let lastSource = null;   // the spec it was built from
+let currentLayer = 1;    // which y layer the grid is drawing
+let powerRow = null;     // which truth-table row the signal view is showing
+let powerField = null;   // dust strengths for that row
 let socket = null;
 
 // Glyphs and the legend come from the server (daedalus/render.py), so the
@@ -320,12 +329,21 @@ function renderGrid(tokens, layer) {
   els.grid.replaceChildren();
   for (let z = 0; z < sz; z++) {
     for (let x = 0; x < sx; x++) {
-      const token = tokens[(y * sz + z) * sx + x];
+      const i = (y * sz + z) * sx + x;
+      const token = tokens[i];
       const info = palette[String(token)] || { kind: "air" };
       const cell = document.createElement("div");
       cell.className = "cell " + info.kind;
       cell.textContent = (info.glyph || "").trim();
       cell.title = `(${x}, ${y}, ${z})  ${info.state || "air"}`;
+      if (powerField && info.kind === "wire") {
+        // Strength in place of the glyph. Where it reaches zero is where the
+        // circuit ran out of signal, which is the reason to look at this view.
+        const level = Math.max(0, Math.min(powerField.dust[i] | 0, 15));
+        cell.textContent = "0123456789ABCDEF"[level];
+        cell.style.color = powerRamp[level] || "";
+        cell.title += `  signal ${level}`;
+      }
       els.grid.appendChild(cell);
     }
   }
@@ -344,6 +362,7 @@ function renderLegend() {
 }
 
 function showSpec(spec) {
+  lastSource = spec.source;
   els.table.textContent = spec.table;
   els.canonical.textContent = spec.source;
   renderDl(els.measurements, [
@@ -366,6 +385,10 @@ function showSpec(spec) {
 function clearResult() {
   lastTokens = null;
   lastLayers = null;
+  powerRow = null;
+  powerField = null;
+  els.signal.replaceChildren();
+  els.signalNote.hidden = true;
   els.layers.replaceChildren();
   els.grid.replaceChildren();
   els.materials.replaceChildren();
@@ -384,6 +407,7 @@ function showLayer(y) {
   if (!lastTokens) return;
   const occupied = lastLayers && lastLayers.length ? lastLayers : [y];
   if (!occupied.includes(y)) y = occupied.includes(geometry.logic_y) ? geometry.logic_y : occupied[0];
+  currentLayer = y;
   renderGrid(lastTokens, y);
 
   const name = y === 0 ? "substrate" : y === geometry.logic_y ? "logic" : "elevated";
@@ -400,10 +424,91 @@ function showLayer(y) {
   }
 }
 
+/**
+ * Ask the verifier to settle the circuit for one input assignment, and draw
+ * what it settled into.
+ *
+ * A verdict says whether a circuit works. This says where the signal actually
+ * goes, which is what someone looking at a layout wants to know -- and the
+ * difference between the row where the output is high and the row where it is
+ * low is the circuit doing its job, visibly.
+ */
+async function showSignal(row) {
+  if (!lastTokens || !lastPlaced) return;
+  if (row === null) {
+    powerRow = null;
+    powerField = null;
+    els.signalNote.hidden = true;
+    renderSignalControls();
+    showLayer(currentLayer);
+    return;
+  }
+  const response = await fetch("/api/power", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tokens: lastTokens,
+      input_z: lastPlaced.input_z,
+      output_z: lastPlaced.output_z,
+      spec_source: lastSource,
+      assignment: row,
+    }),
+  });
+  if (!response.ok) {
+    els.signalNote.textContent = "Could not read the signal for this circuit.";
+    els.signalNote.hidden = false;
+    return;
+  }
+  powerRow = row;
+  powerField = await response.json();
+  const ins = powerField.inputs.map((p) => `${p.name}=${p.on ? 1 : 0}`).join(" ");
+  const outs = powerField.lamps.map((p) => `${p.name}=${p.on ? 1 : 0}`).join(" ");
+  els.signalNote.textContent =
+    `${ins} → ${outs} · ${powerField.reach} cells carrying signal · ` +
+    `${powerField.settled ? "settled" : "did not settle"} after ` +
+    `${powerField.game_ticks} game ticks`;
+  els.signalNote.hidden = false;
+  renderSignalControls();
+  showLayer(currentLayer);
+}
+
+function renderSignalControls() {
+  els.signal.replaceChildren();
+  if (!lastTokens || !lastPlaced) return;
+  const rows = 1 << lastPlaced.input_z.length;
+  const label = document.createElement("span");
+  label.className = "eyebrow";
+  label.textContent = "Signal";
+  els.signal.appendChild(label);
+  for (let row = 0; row < rows; row++) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = lastPlaced.input_z
+      .map((_z, k) => (row >> k) & 1)
+      .join("");
+    button.setAttribute("aria-pressed", String(row === powerRow));
+    button.addEventListener("click", () => showSignal(row === powerRow ? null : row));
+    els.signal.appendChild(button);
+  }
+}
+
 function showResult(attempt) {
   lastTokens = attempt.tokens || null;
   lastLayers = attempt.layers || null;
+  // The ports this attempt was actually built with. The spec payload carries
+  // the placement the *page* rolled, and the compiler re-rolls per attempt, so
+  // using that one would ask the verifier about a different circuit.
+  lastPlaced =
+    attempt.input_z && attempt.output_z
+      ? { input_z: attempt.input_z, output_z: attempt.output_z }
+      : null;
+  // A new circuit invalidates the old signal field entirely: the cells it
+  // describes belong to a layout that is no longer on screen.
+  powerRow = null;
+  powerField = null;
+  els.signalNote.hidden = true;
   if (lastTokens) showLayer(geometry ? geometry.logic_y : 1);
+  renderSignalControls();
   els.noGrid.hidden = Boolean(lastTokens);
   els.results.hidden = false;
   els.empty.hidden = true;
@@ -551,6 +656,7 @@ els.example.addEventListener("change", () => {
   palette = pal.blocks;
   geometry = pal.geometry;
   legend = pal.legend || [];
+  powerRamp = pal.power_ramp || [];
   renderLegend();
 
   const list = await fetch("/api/examples").then((r) => r.json());
