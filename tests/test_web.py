@@ -79,9 +79,16 @@ class TestStreamingMatchesOneShot:
 
         assert streamed is not None
         assert streamed.ok == one_shot.ok
-        assert streamed.stage == one_shot.stage
         if streamed.ok:
+            # A run that passes ends on the attempt that passed, and that is
+            # the one compile() hands back.
+            assert streamed.stage == one_shot.stage
             assert streamed.grid.tokens() == one_shot.grid.tokens()
+        else:
+            # A run that fails ends on whichever attempt was last, while
+            # compile() reports the most informative one -- a working circuit
+            # over budget beats a routing failure that happened to come after.
+            assert not one_shot.ok
 
     def test_stream_yields_the_failures_too(self, verifier):
         # The one-shot API throws away everything but the last result; the

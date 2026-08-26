@@ -30,7 +30,7 @@ from .vocab import CELLS
 
 MAGIC_REQ = b"RSIM"
 MAGIC_RESP = b"RSOK"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 OP_EVALUATE = 1
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -88,11 +88,29 @@ class Pass:
 class Fail:
     mismatched_rows: tuple[RowMismatch, ...]
     constraint: str | None
+    #: What the layout measured, and the budget it missed. Scalar budgets use
+    #: the first component only; a region uses both, as (x, z). Absent when no
+    #: constraint was violated.
+    got: tuple[int, int] | None = None
+    budget: tuple[int, int] | None = None
 
     kind = "fail"
 
     def is_pass(self) -> bool:
         return False
+
+    def overshoot(self) -> str | None:
+        """The miss in words, for a caller reporting a near miss."""
+        if self.constraint is None or self.got is None or self.budget is None:
+            return None
+        if self.constraint == "region":
+            return (
+                f"region {self.got[0]}x{self.got[1]} against a budget of "
+                f"{self.budget[0]}x{self.budget[1]}"
+            )
+        unit = {"latency": "rt", "blocks": "blocks"}.get(self.constraint, "")
+        measured = f"{self.got[0]} {unit}".strip()
+        return f"{measured} against a budget of {self.budget[0]}"
 
     def mismatch_count(self) -> int:
         return len(self.mismatched_rows) + (1 if self.constraint else 0)
@@ -323,7 +341,10 @@ class Verifier:
             code = self._read_exact(1)[0]
             if code >= len(CONSTRAINT_NAMES):
                 raise VerifierError(f"unknown constraint code {code}")
-            return Fail(tuple(rows), CONSTRAINT_NAMES[code])
+            if code == 0:
+                return Fail(tuple(rows), None)
+            got_a, got_b, max_a, max_b = struct.unpack("<4I", self._read_exact(16))
+            return Fail(tuple(rows), CONSTRAINT_NAMES[code], (got_a, got_b), (max_a, max_b))
         if kind == 2:
             return Unstable(period_ticks=self._read_exact(1)[0])
         if kind == 3:

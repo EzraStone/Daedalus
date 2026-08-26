@@ -28,7 +28,7 @@ use redsim::{evaluate_batch, Pos, Spec, Verdict};
 
 const MAGIC_REQ: &[u8; 4] = b"RSIM";
 const MAGIC_RESP: &[u8; 4] = b"RSOK";
-const PROTOCOL_VERSION: u8 = 1;
+const PROTOCOL_VERSION: u8 = 2;
 const OP_EVALUATE: u8 = 1;
 
 fn main() {
@@ -200,13 +200,31 @@ fn write_verdict<W: Write>(w: &mut W, v: &Verdict) -> io::Result<()> {
                 w.write_all(&m.observed.to_le_bytes())?;
                 w.write_all(&m.expected.to_le_bytes())?;
             }
-            let code = match constraint {
-                None => 0u8,
-                Some(ConstraintViolation::Latency { .. }) => 1,
-                Some(ConstraintViolation::Blocks { .. }) => 2,
-                Some(ConstraintViolation::Region { .. }) => 3,
+            // The code alone says which budget was missed but not by how
+            // much, and the numbers are right here. "38 blocks against a
+            // budget of 34" is something a caller can act on; "blocks" is not.
+            // Scalar budgets leave the second component zero; a region uses
+            // both, as (x, z).
+            let (code, got, max) = match constraint {
+                None => (0u8, (0u32, 0u32), (0u32, 0u32)),
+                Some(ConstraintViolation::Latency { got, max }) => {
+                    (1u8, (*got, 0), (*max, 0))
+                }
+                Some(ConstraintViolation::Blocks { got, max }) => {
+                    (2u8, (u32::from(*got), 0), (u32::from(*max), 0))
+                }
+                Some(ConstraintViolation::Region { got, max }) => (
+                    3u8,
+                    (u32::from(got.0), u32::from(got.1)),
+                    (u32::from(max.0), u32::from(max.1)),
+                ),
             };
             w.write_all(&[code])?;
+            if code != 0 {
+                for v in [got.0, got.1, max.0, max.1] {
+                    w.write_all(&v.to_le_bytes())?;
+                }
+            }
         }
         Verdict::Unstable { period_ticks } => w.write_all(&[2, *period_ticks])?,
         Verdict::Malformed { reason } => {

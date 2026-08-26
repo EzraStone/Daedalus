@@ -77,3 +77,45 @@ def test_a_short_write_keeps_going_until_the_whole_request_is_out():
     payload = bytes(range(256)) * 8
     verifier_over(proc)._write(payload)
     assert bytes(proc.stdin.written) == payload
+
+
+class TestConstraintDetail:
+    """A missed budget should say by how much."""
+
+    def _fail(self, source, attempts=20):
+        import random
+
+        from daedalus.spec import Spec
+        from daedalus.synth import compile_attempts
+
+        with Verifier() as v:
+            for attempt in compile_attempts(Spec.parse(source), v, random.Random(0), attempts):
+                if attempt.stage == "constraint" and attempt.verdict is not None:
+                    return attempt.verdict
+        return None
+
+    def test_a_block_budget_reports_the_measurement_and_the_budget(self):
+        # The numbers exist in the simulator; before this they were computed
+        # and then dropped at the wire, leaving the caller with the word
+        # "blocks" and nothing to act on.
+        verdict = self._fail("inputs A B C\noutputs Q\nQ = !(A & B) | C\nfootprint <= 34")
+        assert verdict is not None
+        assert verdict.got[0] > 34
+        assert verdict.budget[0] == 34
+        assert "against a budget of 34" in verdict.overshoot()
+
+    def test_a_latency_budget_carries_its_unit(self):
+        verdict = self._fail("inputs A B\noutputs Q\nQ = !(A & B)\nlatency <= 1")
+        assert verdict is not None
+        assert "rt" in verdict.overshoot()
+
+    def test_a_region_budget_reports_both_dimensions(self):
+        verdict = self._fail("inputs A B\noutputs Q\nQ = !(A & B)\nregion <= 16 x 4")
+        assert verdict is not None
+        assert verdict.budget == (16, 4)
+        assert "16x4" in verdict.overshoot()
+
+    def test_a_plain_wrong_answer_has_nothing_to_overshoot(self):
+        from daedalus.redsim import Fail, RowMismatch
+
+        assert Fail((RowMismatch(0, 0, 1),), None).overshoot() is None

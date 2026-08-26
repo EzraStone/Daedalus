@@ -67,9 +67,10 @@ def compile_attempts(
 ) -> Iterator[Attempt]:
     """Yield every attempt at compiling ``spec``, as each one finishes.
 
-    Same work as :func:`compile`, exposed one step at a time. The last item is
-    always the one :func:`compile` would have returned; everything before it is
-    a failed try, with the stage and detail that explain why.
+    Same work as :func:`compile`, exposed one step at a time and in the order
+    it happened. A successful run ends with the attempt that passed, which is
+    also what :func:`compile` returns; a failed one ends with whichever attempt
+    was last, while :func:`compile` picks the most informative of them.
 
     This exists because "it failed" is a much less useful thing to be told than
     "it placed four times, ran out of room routing net 2 each time, and here is
@@ -127,10 +128,13 @@ def compile_attempts(
         # calling both "verify" tells the caller to go looking in the wrong
         # place. The first is a budget the placer was never told about; the
         # second is a bug in the layout.
-        stage = "constraint" if _constraint_only(verdict) else "verify"
+        if _constraint_only(verdict):
+            stage, detail = "constraint", verdict.overshoot() or str(verdict)
+        else:
+            stage, detail = "verify", str(verdict)
         stats.note(stage)
         produced = True
-        yield Attempt(grid, verdict, placed, stage, str(verdict))
+        yield Attempt(grid, verdict, placed, stage, detail)
 
     if not produced:
         # `attempts <= 0`. Reported rather than returning an empty stream, so a
@@ -173,13 +177,39 @@ def compile(  # noqa: A001 - the domain word is the right one here
     is what makes the discard rate a diagnosis instead of a mystery.
     """
     last: Attempt | None = None
+    best: Attempt | None = None
     for attempt in compile_attempts(
         spec, verifier, rng, attempts, library, stats, fixed_placement
     ):
         last = attempt
         if attempt.ok:
-            break
-    return last or Attempt(None, None, None, "placement", "no attempt got as far as routing")
+            return attempt
+        if best is None or _informativeness(attempt) > _informativeness(best):
+            best = attempt
+
+    # Report the most informative failure rather than whichever happened to be
+    # last. A run that produced a working circuit two blocks over budget and
+    # then rerolled into a routing failure should say the first thing: it is
+    # the one that tells you what to change.
+    return best or last or Attempt(
+        None, None, None, "placement", "no attempt got as far as routing"
+    )
+
+
+#: How much a failed attempt tells you, worst to best. A constraint miss got
+#: furthest -- the circuit works -- so it is the most useful thing to report.
+_STAGE_RANK = {
+    "placement": 0,
+    "netlist": 1,
+    "signal": 2,
+    "routing": 3,
+    "verify": 4,
+    "constraint": 5,
+}
+
+
+def _informativeness(attempt: Attempt) -> int:
+    return _STAGE_RANK.get(attempt.stage, 0)
 
 
 def compile_many(
