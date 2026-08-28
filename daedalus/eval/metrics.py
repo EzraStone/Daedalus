@@ -211,3 +211,42 @@ def summarise(
 
 def grid_of(tokens) -> Grid:
     return Grid.from_tokens(tokens)
+
+
+def grade_repairs(method, tasks, verifier: Verifier, k: int = 4) -> dict:
+    """Score a repair method over damaged circuits.
+
+    Two numbers, because passing is not the whole claim. A method that rebuilds
+    the circuit correctly but rewrites half the grid has not repaired anything
+    -- it has regenerated, using the damage as an excuse -- and a player who
+    wanted their build back would not accept it.
+
+    ``touched_outside`` counts cells changed beyond the damaged region, over
+    the repairs that actually verified. Zero is what repair means.
+    """
+    results, outside, respected = [], [], 0
+    for task in tasks:
+        candidates = method(task, k)
+        if not candidates:
+            results.append(SpecResult(verdicts=[]))
+            continue
+        result = grade(candidates, task.placed, verifier)
+        results.append(result)
+        allowed = set(task.hit)
+        for i in result.passing:
+            changed = {
+                cell
+                for cell, (a, b) in enumerate(zip(candidates[i], task.original))
+                if a != b
+            }
+            stray = changed - allowed
+            outside.append(len(stray))
+            respected += not stray
+    return {
+        "tasks": len(tasks),
+        "repaired": repair_success(results),
+        "mean_cells_touched_outside": (
+            round(statistics.fmean(outside), 3) if outside else 0.0
+        ),
+        "repairs_that_stayed_inside": respected,
+    }

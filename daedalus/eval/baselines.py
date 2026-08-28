@@ -274,3 +274,85 @@ def parse_ascii_layer(text: str) -> list[int]:
 def render_ascii_layer(grid: Grid) -> str:
     """The inverse, for building few-shot prompts from real circuits."""
     return grid.layer_text(V.LOGIC_Y)
+
+
+@dataclass
+class RepairTask:
+    """One damaged circuit, and the grid it was damaged from.
+
+    Kept apart from generation because it measures a different claim. A method
+    that cannot generate a working circuit from nothing may still be able to
+    put a broken one back, and that is the capability §06 says a player would
+    actually reach for.
+    """
+
+    spec: Spec
+    placed: PlacedSpec
+    original: list[int]
+    damaged: list[int]
+    #: Cells the corruption touched, which is what a repairer is allowed to
+    #: change. Anything outside them is not repair.
+    hit: list[int]
+
+
+def repair_tasks(
+    corpus, rng: random.Random, count: int, blocks: int = 6
+) -> list[RepairTask]:
+    """Damage verified circuits, for measuring inpainting.
+
+    ``corpus`` is the ``(spec, tokens, input_z, output_z)`` tuples the other
+    baselines already take, so the same corpus can drive both.
+    """
+    from ..data.corpus import Example, corrupt
+
+    out = []
+    for spec, tokens, input_z, output_z in corpus[:count]:
+        placed = spec.place(input_z, output_z)
+        example = Example(
+            spec_source=spec.source(),
+            spec_hash=spec.key(),
+            gates=spec.gates,
+            n_inputs=spec.n_inputs,
+            n_outputs=spec.n_outputs,
+            rows=list(spec.rows),
+            input_z=list(input_z),
+            output_z=list(output_z),
+            tokens=list(tokens),
+            latency_rt=0,
+            blocks=0,
+            bbox=[0, 0, 0],
+            prompts=[],
+        )
+        damaged, hit = corrupt(example, rng, blocks=blocks)
+        out.append(RepairTask(spec, placed, list(tokens), damaged, list(hit)))
+    return out
+
+
+@dataclass
+class OracleRepair:
+    """The ceiling: put back exactly what was removed.
+
+    Not a method anyone would ship -- it is handed the answer. It exists so
+    repair_success has a 1.0 to sit under, and so a repair harness that scores
+    zero can be told apart from one that is wired up wrong.
+    """
+
+    name: str = "oracle-repair"
+
+    def __call__(self, task: RepairTask, k: int) -> list[list[int]]:
+        return [list(task.original) for _ in range(k)]
+
+
+@dataclass
+class NoRepair:
+    """The floor: hand the damage straight back.
+
+    Anything scoring at this level has not repaired anything, and a corruption
+    that leaves the circuit working would show up here as a suspiciously high
+    number -- which is worth knowing about the damage, not the repairer.
+    """
+
+    name: str = "no-repair"
+
+    def __call__(self, task: RepairTask, k: int) -> list[list[int]]:
+        return [list(task.damaged) for _ in range(k)]

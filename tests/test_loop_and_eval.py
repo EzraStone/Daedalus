@@ -419,3 +419,60 @@ class TestConstrainedRandom:
                 if V.decode(token).kind in ("lever", "lamp"):
                     assert i in allowed, V.unindex(i)
         del verifier
+
+
+class TestRepairHarness:
+    """repair_success existed with nothing feeding it. This feeds it."""
+
+    def tasks(self, verifier, worked, n=3):
+        from daedalus.eval import repair_tasks
+
+        corpus = [(s, t, p.input_z, p.output_z) for s, p, t in worked[:n]]
+        return repair_tasks(corpus, random.Random(1), n)
+
+    def test_the_oracle_repairs_everything_and_touches_nothing_else(self, verifier, worked):
+        # The ceiling. A harness that cannot score this at 1.0 is wired wrong,
+        # and a repairer scoring zero could not be told apart from one.
+        from daedalus.eval import OracleRepair, grade_repairs
+
+        got = grade_repairs(OracleRepair(), self.tasks(verifier, worked), verifier, k=2)
+        assert got["repaired"] == 1.0
+        assert got["mean_cells_touched_outside"] == 0.0
+
+    def test_handing_the_damage_back_repairs_nothing(self, verifier, worked):
+        from daedalus.eval import NoRepair, grade_repairs
+
+        got = grade_repairs(NoRepair(), self.tasks(verifier, worked), verifier, k=2)
+        assert got["repaired"] == 0.0
+
+    def test_a_task_records_what_may_be_changed(self, verifier, worked):
+        # Repair is defined by what it leaves alone, so the damaged cells have
+        # to travel with the task rather than being re-derived.
+        tasks = self.tasks(verifier, worked)
+        assert tasks
+        for task in tasks:
+            assert task.hit
+            changed = {i for i, (a, b) in enumerate(zip(task.damaged, task.original)) if a != b}
+            assert changed <= set(task.hit)
+
+    def test_rebuilding_the_whole_grid_is_counted_as_straying(self, verifier, worked):
+        # The number that separates repair from regeneration. A method that
+        # produces a correct circuit by rewriting everything has not repaired.
+        from daedalus.eval import grade_repairs
+
+        tasks = self.tasks(verifier, worked)
+
+        class Rebuilder:
+            name = "rebuilder"
+
+            def __call__(self, task, k):
+                grid = list(task.original)
+                # Correct, but touches a cell the damage never reached.
+                for cell in range(V.CELLS):
+                    if grid[cell] == V.AIR and cell not in set(task.hit):
+                        grid[cell] = V.AIR
+                        break
+                return [grid for _ in range(k)]
+
+        got = grade_repairs(Rebuilder(), tasks, verifier, k=1)
+        assert got["repaired"] == 1.0
