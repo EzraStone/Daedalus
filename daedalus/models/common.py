@@ -291,3 +291,42 @@ def cosine_schedule(step: int, total: int, warmup: int, peak: float, floor: floa
         return peak * (step + 1) / max(warmup, 1)
     progress = (step - warmup) / max(total - warmup, 1)
     return peak * (floor + (1 - floor) * 0.5 * (1 + math.cos(math.pi * min(progress, 1.0))))
+
+
+if HAVE_TORCH:
+
+    class PromptEncoder(nn.Module):
+        """Hashed prompt features into the vectors the prefix reserves slots for.
+
+        A mean over word embeddings, projected once per slot. Deliberately
+        small and deliberately order-blind: with a few thousand corpus prompts
+        there is not enough text to learn word order from, and a bag that
+        generalises poorly is a more honest starting point than a sequence
+        model that overfits and looks like it works.
+
+        Trained jointly with the generator rather than frozen -- see
+        :mod:`daedalus.text` for why there is no frozen encoder here, and what
+        that costs.
+        """
+
+        def __init__(self, d_model: int, slots: int = 4, buckets: int | None = None):
+            super().__init__()
+            require_torch()
+            from ..text import BUCKETS
+
+            self.slots = slots
+            # +1 because feature 0 is padding, and padding_idx keeps it at zero
+            # so a short prompt is not dragged toward whatever it would embed.
+            self.embed = nn.Embedding((buckets or BUCKETS) + 1, d_model, padding_idx=0)
+            self.project = nn.Linear(d_model, d_model * slots)
+            self.norm = nn.RMSNorm(d_model)
+
+        def forward(self, features):
+            """``(batch, length)`` feature ids -> ``(batch, slots, d_model)``."""
+            mask = (features != 0).float().unsqueeze(-1)
+            summed = (self.embed(features) * mask).sum(dim=1)
+            # Mean over real words only. Dividing by the padded length would
+            # make a short prompt a quiet one.
+            pooled = summed / mask.sum(dim=1).clamp_min(1.0)
+            out = self.project(self.norm(pooled))
+            return out.view(features.shape[0], self.slots, -1)

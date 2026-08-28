@@ -320,3 +320,62 @@ class TestEndToEnd:
             verdict = v.evaluate(Grid.from_tokens(body), placed)
         assert verdict is not None, name
         assert hasattr(verdict, "is_pass"), name
+
+
+class TestPromptEncoder:
+    """The other half of the conditioning path the prefix reserved slots for."""
+
+    def encoder(self, slots=4):
+        from daedalus.models import PromptEncoder
+
+        torch.manual_seed(0)
+        return PromptEncoder(d_model=TINY.d_model, slots=slots)
+
+    def features(self, prompts):
+        from daedalus.text import encode_prompts
+
+        return torch.tensor(encode_prompts(prompts))
+
+    def test_it_produces_one_vector_per_slot(self):
+        out = self.encoder(slots=4)(self.features(["turn the lamp on", "invert both"]))
+        assert out.shape == (2, 4, TINY.d_model)
+
+    def test_an_empty_prompt_is_finite_rather_than_a_division_by_zero(self):
+        # Pooling divides by the number of real words, and a prompt of pure
+        # padding has none.
+        out = self.encoder()(self.features([""]))
+        assert torch.isfinite(out).all()
+
+    def test_different_prompts_land_somewhere_different(self):
+        out = self.encoder()(self.features(["turn the lamp on", "keep it off"]))
+        assert (out[0] != out[1]).any()
+
+    def test_padding_does_not_dilute_a_short_prompt(self):
+        # Dividing by the padded width instead of the word count would make a
+        # short prompt a quiet one, and length is not meaning.
+        encoder = self.encoder()
+        short = encoder(self.features(["lamp"]))
+        padded = encoder(torch.tensor([[*self.features(["lamp"])[0].tolist()]]))
+        assert torch.allclose(short, padded)
+
+    def test_it_splices_into_the_prefix_the_body_reserved(self):
+        # The end of the path: encoder output goes where spec_prefix marked.
+        from daedalus.models.common import Body
+
+        torch.manual_seed(0)
+        body = Body(TINY, causal=False)
+        tokens = torch.randint(0, V.CONTROL_BASE, (2, V.SEQ_LEN))
+        vectors = self.encoder(slots=4)(self.features(["a", "b"]))
+        with torch.no_grad():
+            plain = body(tokens)
+            conditioned = body(tokens, nl_embeddings=vectors)
+        assert not torch.allclose(plain, conditioned), "the prompt changed nothing"
+
+    def test_gradients_reach_the_word_embeddings(self):
+        encoder = self.encoder()
+        out = encoder(self.features(["turn the lamp on"]))
+        out.sum().backward()
+        grad = encoder.embed.weight.grad
+        assert grad is not None and grad.abs().sum() > 0
+        # Padding is held at zero, so it must never accumulate one.
+        assert torch.equal(grad[0], torch.zeros_like(grad[0]))
