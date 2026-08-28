@@ -131,6 +131,12 @@ class ModelConfig:
     #: (x, z). Cheaper than full attention over 1536 tokens and matches the
     #: geometry. Off by default so it stays a clean ablation.
     layer_factored_attention: bool = False
+    #: Prefix slots given to a natural-language prompt. Zero means the model is
+    #: conditioned on the canonical spec alone, which is the comparison the
+    #: prompt path has to beat before it is worth anything.
+    nl_slots: int = 0
+    #: Feature ids per prompt. Corpus paraphrases run to a dozen words or so.
+    nl_length: int = 32
 
     @property
     def d_head(self) -> int:

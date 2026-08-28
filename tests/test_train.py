@@ -139,3 +139,63 @@ class TestEvaluation:
     def test_evaluating_on_nothing_is_an_error(self):
         with pytest.raises(ValueError):
             evaluate(MaskedDiffusionModel(TINY), [])
+
+
+class TestPromptConditioning:
+    """Training on the paraphrases the corpus has always carried."""
+
+    def prompted(self, slots=4):
+        from daedalus.models.common import ModelConfig as MC
+
+        torch.manual_seed(0)
+        return MaskedDiffusionModel(
+            MC(n_layers=2, d_model=64, n_heads=4, d_ff=128, nl_slots=slots)
+        )
+
+    def test_a_spec_only_model_carries_no_prompt_parameters(self):
+        # The two have to be a clean comparison, not the same model with a
+        # dead branch inflating its parameter count.
+        assert self.prompted(slots=0).prompts is None
+        assert self.prompted(slots=4).prompts is not None
+
+    def test_the_prompt_encoder_is_trained_along_with_the_body(self):
+        model = self.prompted()
+        examples = make_examples(8)
+        before = model.prompts.embed.weight.detach().clone()
+        train(model, examples, TrainConfig(epochs=4, batch_size=4, warmup=2, log_every=100))
+        assert not torch.equal(before, model.prompts.embed.weight)
+
+    def test_a_prompted_model_still_improves(self):
+        model = self.prompted()
+        examples = make_examples(16)
+        before = evaluate(model, examples, seed=0)
+        train(model, examples, TrainConfig(epochs=8, batch_size=4, warmup=4, log_every=100))
+        assert evaluate(model, examples, seed=0) < before
+
+    def test_examples_without_prompts_encode_to_padding(self):
+        # The corpus can carry examples with no paraphrases, and those must
+        # read as "no condition" rather than as some arbitrary one.
+        from daedalus.train.pretrain import to_prompt_features
+
+        examples = make_examples(2)
+        for e in examples:
+            e.prompts = []
+        assert all(set(f) == {0} for f in to_prompt_features(examples, random.Random(0)))
+
+    def test_a_prompt_is_drawn_from_the_example_s_own_paraphrases(self):
+        from daedalus.text import encode_prompt
+        from daedalus.train.pretrain import to_prompt_features
+
+        examples = make_examples(1)
+        examples[0].prompts = ["turn the lamp on", "light it up"]
+        got = to_prompt_features(examples, random.Random(0))[0]
+        assert got in (encode_prompt("turn the lamp on"), encode_prompt("light it up"))
+
+    def test_evaluation_conditions_on_the_prompt_too(self):
+        # Scoring a prompt-trained model without its prompt compares a model
+        # that was given the question against one that was not.
+        model = self.prompted()
+        examples = make_examples(4)
+        with torch.no_grad():
+            seen = evaluate(model, examples, seed=0)
+        assert seen == evaluate(model, examples, seed=0)

@@ -14,7 +14,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .. import vocab as V
-from .common import HAVE_TORCH, ModelConfig, as_legality, require_torch, support_tables
+from .common import (
+    HAVE_TORCH,
+    ModelConfig,
+    PromptEncoder,
+    as_legality,
+    require_torch,
+    support_tables,
+)
 
 if HAVE_TORCH:
     import torch
@@ -30,6 +37,14 @@ if HAVE_TORCH:
             super().__init__()
             require_torch()
             self.cfg = cfg or ModelConfig()
+            # Only built when the config asks for it, so a spec-conditioned
+            # model carries no prompt parameters at all and the two are a
+            # clean comparison rather than the same model with a dead branch.
+            self.prompts = (
+                PromptEncoder(self.cfg.d_model, self.cfg.nl_slots)
+                if self.cfg.nl_slots
+                else None
+            )
             self.body = Body(self.cfg, causal=True)
 
         def forward(self, tokens, nl_embeddings=None):

@@ -92,9 +92,38 @@ def to_sequences(examples: list[Example]):
     return out
 
 
+def to_prompt_features(examples: list[Example], rng: random.Random, length: int = 32):
+    """One prompt per example, as feature ids.
+
+    An example carries several paraphrases of the same spec and picking one at
+    random per epoch is the point of having them: the model should learn the
+    circuit, not one wording of it. Examples with no prompts encode to padding,
+    which the encoder pools to nothing rather than to a wrong condition.
+    """
+    from ..text import encode_prompt
+
+    return [
+        encode_prompt(rng.choice(e.prompts) if e.prompts else "", length)
+        for e in examples
+    ]
+
+
 #: Mask rates the fixed-ratio evaluation sweeps. Spread across the range so
 #: the number reflects both nearly-clean and nearly-empty grids.
 EVAL_RATIOS = (0.1, 0.3, 0.5, 0.7, 0.9)
+
+
+def _encode_batch(model, features, device):
+    """Prompt vectors for one batch, or None when the model is spec-only.
+
+    A model built without prompt slots has no encoder at all, so conditioning
+    it on text is not a thing to skip quietly -- there is nowhere to put it.
+    """
+    import torch
+
+    if getattr(model, "prompts", None) is None:
+        return None
+    return model.prompts(torch.tensor(features, dtype=torch.long, device=device))
 
 
 def evaluate(model, examples: list[Example], seed: int = 0, batch_size: int = 16) -> float:
@@ -117,6 +146,10 @@ def evaluate(model, examples: list[Example], seed: int = 0, batch_size: int = 16
 
     device = next(model.parameters()).device
     sequences = to_sequences(examples)
+    # A prompt-conditioned model has to be scored *with* its prompt. Measuring
+    # it unconditioned compares a model that was given the question against one
+    # that was not, and reports the difference as quality.
+    features = to_prompt_features(examples, random.Random(seed), model.cfg.nl_length)
     ratios = EVAL_RATIOS if hasattr(model, "loss_at") else (None,)
     was_training = model.training
     model.eval()
@@ -127,9 +160,14 @@ def evaluate(model, examples: list[Example], seed: int = 0, batch_size: int = 16
             if not chunk:
                 continue
             tokens = torch.tensor(chunk, dtype=torch.long, device=device)
+            nl = _encode_batch(model, features[start : start + batch_size], device)
             for ratio in ratios:
                 torch.manual_seed(seed)
-                loss = model.loss(tokens) if ratio is None else model.loss_at(tokens, ratio)
+                loss = (
+                    model.loss(tokens, nl_embeddings=nl)
+                    if ratio is None
+                    else model.loss_at(tokens, ratio, nl_embeddings=nl)
+                )
                 total += float(loss)
                 batches += 1
     model.train(was_training)
@@ -199,6 +237,9 @@ def train(
     torch.manual_seed(cfg.seed)
 
     sequences = to_sequences(examples)
+    # Paired with the sequences so shuffling keeps a grid with its own prompt.
+    prompts = to_prompt_features(examples, rng, model.cfg.nl_length)
+    paired = list(zip(sequences, prompts))
     weights = class_weights(token_counts(examples)).to(device)
     # The prefix vocabulary is never a prediction target, so it gets no weight.
     full_weights = torch.cat(
@@ -206,20 +247,21 @@ def train(
     )
 
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    steps_per_epoch = max(1, len(sequences) // cfg.batch_size)
+    steps_per_epoch = max(1, len(paired) // cfg.batch_size)
     total = steps_per_epoch * cfg.epochs
     history = []
     step = 0
     started = time.time()
 
     for epoch in range(cfg.epochs):
-        rng.shuffle(sequences)
+        rng.shuffle(paired)
         for i in range(steps_per_epoch):
-            batch = sequences[i * cfg.batch_size : (i + 1) * cfg.batch_size]
+            batch = paired[i * cfg.batch_size : (i + 1) * cfg.batch_size]
             if not batch:
                 continue
-            tokens = torch.tensor(batch, dtype=torch.long, device=device)
-            loss = model.loss(tokens, weights=full_weights)
+            tokens = torch.tensor([b[0] for b in batch], dtype=torch.long, device=device)
+            nl = _encode_batch(model, [b[1] for b in batch], device)
+            loss = model.loss(tokens, weights=full_weights, nl_embeddings=nl)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)

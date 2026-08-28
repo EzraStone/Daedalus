@@ -25,7 +25,14 @@ from dataclasses import dataclass
 
 from .. import vocab as V
 from ..tokens import TOTAL_VOCAB
-from .common import HAVE_TORCH, ModelConfig, as_legality, require_torch, support_tables
+from .common import (
+    HAVE_TORCH,
+    ModelConfig,
+    PromptEncoder,
+    as_legality,
+    require_torch,
+    support_tables,
+)
 
 #: The absorbing state, offset into the shared embedding table.
 MASK_ID = V.MASK
@@ -44,6 +51,14 @@ if HAVE_TORCH:
             super().__init__()
             require_torch()
             self.cfg = cfg or ModelConfig()
+            # Only built when the config asks for it, so a spec-conditioned
+            # model carries no prompt parameters at all and the two are a
+            # clean comparison rather than the same model with a dead branch.
+            self.prompts = (
+                PromptEncoder(self.cfg.d_model, self.cfg.nl_slots)
+                if self.cfg.nl_slots
+                else None
+            )
             self.body = Body(self.cfg, causal=False)
 
         def forward(self, tokens, nl_embeddings=None):
