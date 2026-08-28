@@ -71,6 +71,7 @@ no README.
 | `daedalus.web` — the local window | Complete. Watch a spec get placed, routed and verified, step by step. |
 | `daedalus.train.loop` — the §06 loop | Complete. Runs end to end with a real model via `daedalus loop`; no model good enough to make the curve mean anything yet. |
 | `daedalus.models` — AR and diffusion | Both train and sample on CPU. Checkpoints save and reload; samples clear every pre-simulation check and come back with real verdicts. |
+| `daedalus.text` — prompt conditioning | Works end to end: `train --nl-slots 4`, `sample --prompt "..."`. It is **not** the frozen sentence encoder §05 asks for — see below. |
 
 ### Written but not yet run
 
@@ -130,6 +131,11 @@ pip install -e ".[train]"
 python -m daedalus train data/ --out runs/first
 python -m daedalus sample runs/first/model.pt specs/nand.txt -k 8
 python -m daedalus loop runs/first/model.pt --corpus data/ --rounds 5
+
+# conditioned on the corpus paraphrases as well as the spec
+python -m daedalus train data/ --nl-slots 4 --out runs/text
+python -m daedalus sample runs/text/model.pt specs/nand.txt \
+    --prompt "turn the lamp off when both levers are on"
 ```
 
 `train` prints a validation loss alongside the training loss, and for the
@@ -144,6 +150,17 @@ is attached and reporting.
 the curriculum on merit. It prints the collapse warning on the way out, since
 rising pass@1 with falling diversity is the failure mode that looks like
 success.
+
+**On the prompt path.** Every corpus example has always carried four to eight
+paraphrases of its spec, and the prefix has always reserved slots for their
+embeddings; nothing filled them until now. What fills them is a small encoder
+trained jointly with the generator, over hashed word features — *not* the
+frozen sentence encoder §05 specifies, which needs a pretrained model this
+repository does not ship. The trade is that it costs nothing to install and
+generalises only to phrasings like the corpus, which is exactly the
+generalisation a frozen encoder would have brought. `daedalus/text.py` states
+it in full. The path is now real and measurable; whether it works is a
+question that needs a trained model to answer.
 
 ### The window
 
