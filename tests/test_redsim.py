@@ -188,3 +188,40 @@ class TestPowerField:
         broken.set(3, V.SUBSTRATE_Y, 3, V.AIR)
         with Verifier() as v, _pytest.raises(VerifierError, match="malformed"):
             v.power(broken, attempt.placed, 0)
+
+
+class TestStaleBinary:
+    """The failure mode a protocol bump creates for anyone who does not rebuild."""
+
+    def test_a_worker_that_dies_before_answering_blames_the_binary(self):
+        class DeadProc:
+            def __init__(self):
+                self.stdin = DribblingPipe()
+                self.stdout = DribblingPipe(b"")
+
+            def poll(self):
+                return 1  # exited, non-zero
+
+        with pytest.raises(VerifierError) as caught:
+            verifier_over(DeadProc())._read_exact(4)
+        message = str(caught.value)
+        assert "cargo build --release -p redsim" in message
+        assert "protocol" in message
+
+    def test_a_worker_that_dies_midway_does_not_blame_the_binary(self):
+        # It answered, then stopped. That is a different problem, and pointing
+        # at a rebuild would send someone the wrong way.
+        class HalfProc:
+            def __init__(self):
+                self.stdin = DribblingPipe()
+                self.stdout = DribblingPipe(b"ab")
+
+            def poll(self):
+                return 1
+
+        with pytest.raises(VerifierError) as caught:
+            verifier_over(HalfProc())._read_exact(4)
+        assert "cargo build" not in str(caught.value)
+
+    def test_a_healthy_worker_still_reads_normally(self):
+        assert verifier_over(FakeProc(b"abcd"))._read_exact(4) == b"abcd"

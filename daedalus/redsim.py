@@ -310,10 +310,21 @@ class Verifier:
             chunk = self._proc.stdout.read(n - len(buf))
             if not chunk:
                 code = self._proc.poll()
-                raise VerifierError(
-                    f"redsim worker closed the pipe after {len(buf)}/{n} bytes"
-                    + (f" (exit {code})" if code is not None else "")
-                )
+                message = f"redsim worker closed the pipe after {len(buf)}/{n} bytes"
+                if code is not None:
+                    message += f" (exit {code})"
+                if code not in (None, 0) and not buf:
+                    # Dying before writing a single byte is what a worker does
+                    # when it rejects the request outright, and by far the
+                    # commonest reason is a binary older than this client.
+                    # The worker says so on stderr, which is easy to miss and
+                    # is swallowed entirely by a test runner or a web server.
+                    message += (
+                        f"\nThe worker refused the request before answering. This "
+                        f"client speaks protocol {PROTOCOL_VERSION}; an older "
+                        f"binary will not.\nRebuild it: cargo build --release -p redsim"
+                    )
+                raise VerifierError(message)
             buf += chunk
         return bytes(buf)
 
