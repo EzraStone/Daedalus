@@ -379,3 +379,90 @@ class TestPromptEncoder:
         assert grad is not None and grad.abs().sum() > 0
         # Padding is held at zero, so it must never accumulate one.
         assert torch.equal(grad[0], torch.zeros_like(grad[0]))
+
+
+class TestPromptGuidance:
+    """Classifier-free guidance over the prompt, not just the spec prefix."""
+
+    def model(self):
+        from daedalus.models.common import ModelConfig as MC
+
+        torch.manual_seed(0)
+        m = MaskedDiffusionModel(MC(n_layers=2, d_model=64, n_heads=4, d_ff=128, nl_slots=4))
+        m.eval()
+        return m
+
+    def vectors(self, model, text, n=2):
+        from daedalus.text import encode_prompt
+
+        return model.prompts(torch.tensor([encode_prompt(text)] * n))
+
+    def test_guidance_changes_what_is_sampled(self):
+        # If the unconditional branch were never taken, guidance would be a
+        # no-op and the flag would be decoration.
+        _spec, placed = placed_nand()
+        model = self.model()
+        prefix, _slots = T.spec_prefix(placed)
+        nl = self.vectors(model, "turn the lamp off when both levers are on")
+        out = []
+        for guidance in (1.0, 4.0):
+            torch.manual_seed(1)
+            out.append(
+                model.sample(
+                    torch.tensor([prefix] * 2, dtype=torch.long),
+                    steps=6,
+                    guidance=guidance,
+                    nl_embeddings=nl,
+                    legality=T.legality_mask(placed),
+                    pinned=T.port_mask(placed),
+                )
+            )
+        assert not torch.equal(out[0], out[1])
+
+    def test_guidance_without_a_prompt_is_inert(self):
+        # No condition to guide away from, so it must not silently do
+        # something arbitrary.
+        _spec, placed = placed_nand()
+        model = self.model()
+        prefix, _slots = T.spec_prefix(placed)
+        out = []
+        for guidance in (1.0, 4.0):
+            torch.manual_seed(1)
+            out.append(
+                model.sample(
+                    torch.tensor([prefix], dtype=torch.long),
+                    steps=4,
+                    guidance=guidance,
+                    legality=T.legality_mask(placed),
+                    pinned=T.port_mask(placed),
+                )
+            )
+        assert torch.equal(out[0], out[1])
+
+    def test_the_blank_prompt_is_all_padding(self):
+        # "No prompt" has to be the thing training taught with dropout, not
+        # some other vector that happens to be handy.
+        from daedalus.text import encode_prompt
+
+        assert set(encode_prompt("")) == {0}
+
+    def test_dropout_blanks_some_prompts_and_not_all(self):
+        from daedalus.data.corpus import Example
+        from daedalus.train.pretrain import to_prompt_features
+
+        examples = [
+            Example(
+                spec_source="inputs A\noutputs Q\nQ = A",
+                spec_hash="x", gates=0, n_inputs=1, n_outputs=1, rows=[0, 1],
+                input_z=[1], output_z=[1], tokens=[V.AIR] * V.CELLS,
+                latency_rt=1, blocks=1, bbox=[1, 1, 1],
+                prompts=["turn the lamp on"],
+            )
+            for _ in range(200)
+        ]
+        blanked = sum(
+            1
+            for f in to_prompt_features(examples, random.Random(0), dropout=0.3)
+            if set(f) == {0}
+        )
+        assert 20 < blanked < 120, blanked

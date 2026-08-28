@@ -196,6 +196,15 @@ if HAVE_TORCH:
             batch = prefix.shape[0]
             p = self.cfg.prefix_len
             legality = as_legality(legality, device)
+            # The unconditional prompt: all padding, which the encoder pools to
+            # nothing. Built once rather than per step.
+            blank = None
+            if nl_embeddings is not None and self.prompts is not None:
+                blank = self.prompts(
+                    torch.zeros(
+                        prefix.shape[0], self.cfg.nl_length, dtype=torch.long, device=device
+                    )
+                )
             sup_tokens, sup_required, opaque = support_tables(device)
             in_volume = sup_required >= 0
             sup_idx = sup_required.clamp_min(0)
@@ -210,8 +219,19 @@ if HAVE_TORCH:
 
             for step in range(steps):
                 logits = self(torch.cat([prefix, body], dim=1), nl_embeddings)[:, p:]
-                if guidance != 1.0 and uncond_prefix is not None:
-                    uncond = self(torch.cat([uncond_prefix, body], dim=1))[:, p:]
+                if guidance != 1.0 and (uncond_prefix is not None or blank is not None):
+                    # Classifier-free guidance: extrapolate away from what the
+                    # model would have produced without the condition. The
+                    # condition can be the spec prefix, the prompt, or both --
+                    # dropping the prompt alone guides on the text while
+                    # leaving the spec in place, which is the useful case.
+                    uncond = self(
+                        torch.cat(
+                            [uncond_prefix if uncond_prefix is not None else prefix, body],
+                            dim=1,
+                        ),
+                        blank,
+                    )[:, p:]
                     logits = uncond + guidance * (logits - uncond)
                 if legality is not None:
                     logits = logits.masked_fill(~legality, float("-inf"))

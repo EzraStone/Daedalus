@@ -35,6 +35,10 @@ class TrainConfig:
     #: parameters fp32 is genuinely fine while removing a class of NaN
     #: debugging that costs more time than the memory saves.
     dtype: str = "fp32"
+    #: Probability of blanking a prompt during training. Classifier-free
+    #: guidance needs the model to know what "no prompt" looks like; without
+    #: this it has never seen one and the unconditional branch is undefined.
+    prompt_dropout: float = 0.1
     seed: int = 0
 
 
@@ -92,20 +96,33 @@ def to_sequences(examples: list[Example]):
     return out
 
 
-def to_prompt_features(examples: list[Example], rng: random.Random, length: int = 32):
+def to_prompt_features(
+    examples: list[Example],
+    rng: random.Random,
+    length: int = 32,
+    dropout: float = 0.0,
+):
     """One prompt per example, as feature ids.
 
     An example carries several paraphrases of the same spec and picking one at
     random per epoch is the point of having them: the model should learn the
     circuit, not one wording of it. Examples with no prompts encode to padding,
     which the encoder pools to nothing rather than to a wrong condition.
+
+    ``dropout`` blanks a fraction of them outright. Classifier-free guidance
+    samples the conditioned and unconditioned distributions and extrapolates
+    between them, and a model that has never seen a blank prompt has no
+    unconditioned distribution to offer -- the guided branch would be
+    extrapolating away from noise.
     """
     from ..text import encode_prompt
 
-    return [
-        encode_prompt(rng.choice(e.prompts) if e.prompts else "", length)
-        for e in examples
-    ]
+    out = []
+    for e in examples:
+        drop = dropout > 0.0 and rng.random() < dropout
+        text = "" if drop or not e.prompts else rng.choice(e.prompts)
+        out.append(encode_prompt(text, length))
+    return out
 
 
 #: Mask rates the fixed-ratio evaluation sweeps. Spread across the range so
@@ -238,7 +255,9 @@ def train(
 
     sequences = to_sequences(examples)
     # Paired with the sequences so shuffling keeps a grid with its own prompt.
-    prompts = to_prompt_features(examples, rng, model.cfg.nl_length)
+    prompts = to_prompt_features(
+        examples, rng, model.cfg.nl_length, cfg.prompt_dropout
+    )
     paired = list(zip(sequences, prompts))
     weights = class_weights(token_counts(examples)).to(device)
     # The prefix vocabulary is never a prediction target, so it gets no weight.
