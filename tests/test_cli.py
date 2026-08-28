@@ -270,3 +270,21 @@ class TestPromptedSampling:
         model = load_checkpoint(run / "model.pt", device="cpu")
         assert model.cfg.nl_slots == 4
         assert model.prompts is not None
+
+
+class TestRepairRate:
+    def test_a_batch_reports_a_rate_rather_than_one_outcome(self, tmp_path, capsys):
+        pytest.importorskip("torch", reason="training is an optional extra")
+        corpus = write_corpus(tmp_path / "corpus")
+        run = tmp_path / "run"
+        main(["train", str(corpus), "--tiny", "--epochs", "1", "--batch-size", "4",
+              "--out", str(run)])
+        capsys.readouterr()
+        # An undertrained model repairs nothing, so a non-zero exit is honest.
+        code = main(["repair", str(run / "model.pt"), NAND, "--tasks", "2",
+                     "-k", "1", "--steps", "2", "--attempts", "20"])
+        assert code in (0, 1)
+        out = capsys.readouterr().out
+        assert "repaired" in out
+        # The number that separates repair from regeneration has to be shown.
+        assert "mean_cells_touched_outside" in out

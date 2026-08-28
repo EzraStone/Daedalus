@@ -523,6 +523,9 @@ def cmd_repair(args) -> int:
         print("only the diffusion model can repair", file=sys.stderr)
         return 2
 
+    if args.tasks:
+        return _repair_over_many(args, model, spec)
+
     with Verifier() as v:
         built = compile_spec(spec, v, rng, attempts=args.attempts, fixed_placement=placed)
         if not built.ok:
@@ -573,6 +576,55 @@ def cmd_repair(args) -> int:
         print(Grid.from_tokens(fixed[0]).render())
     del V
     return 0 if fixed else 1
+
+
+def _repair_over_many(args, model, spec) -> int:
+    """Score repair over a batch of damaged circuits rather than one.
+
+    One circuit says whether it worked that time. A rate over a set of them is
+    the thing the metric was written for, and it comes with the number that
+    separates repair from regeneration: how many cells were changed outside
+    the damage.
+    """
+    import torch
+
+    from . import tokens as T
+    from .eval import grade_repairs, repair_tasks
+    from .grid import Grid
+    from .synth import compile as compile_spec
+
+    rng = random.Random(args.seed)
+    with Verifier() as v:
+        corpus = []
+        for _ in range(args.tasks):
+            placed = spec.default_placement(rng)
+            built = compile_spec(spec, v, rng, attempts=args.attempts, fixed_placement=placed)
+            if built.ok:
+                corpus.append((spec, built.grid.tokens(), placed.input_z, placed.output_z))
+        if not corpus:
+            print("could not build any circuits to damage", file=sys.stderr)
+            return 1
+        tasks = repair_tasks(corpus, rng, len(corpus), blocks=args.blocks)
+
+        def method(task, k):
+            torch.manual_seed(args.seed)
+            prefix, _slots = T.spec_prefix(task.placed)
+            device = next(model.parameters()).device
+            out = model.repair(
+                torch.tensor([prefix] * k, dtype=torch.long, device=device),
+                torch.tensor([task.damaged], dtype=torch.long, device=device),
+                task.hit,
+                steps=args.steps,
+                legality=T.legality_mask(task.placed),
+                pinned=T.port_mask(task.placed),
+            )
+            return [row.tolist() for row in out.cpu()]
+
+        report = grade_repairs(method, tasks, v, k=args.k)
+    del Grid
+    for key, value in report.items():
+        print(f"  {key:<28} {value}")
+    return 0 if report["repaired"] else 1
 
 
 def cmd_loop(args) -> int:
@@ -795,6 +847,12 @@ def main(argv=None) -> int:
     p.add_argument("checkpoint", help="a diffusion model.pt")
     p.add_argument("spec", help="spec source, or a path to a file containing one")
     p.add_argument("--blocks", type=int, default=6, help="cells to knock out")
+    p.add_argument(
+        "--tasks",
+        type=int,
+        default=0,
+        help="score a repair rate over this many damaged circuits instead of one",
+    )
     p.add_argument("-k", type=int, default=8, help="repair attempts to draw")
     p.add_argument("--steps", type=int, default=24)
     p.add_argument("--attempts", type=int, default=30, help="compiler attempts to build one")
