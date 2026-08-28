@@ -1,0 +1,5 @@
+# Impossible on purpose — a width budget no layout can meet
+inputs A B
+outputs Q
+Q = A & B
+region <= 10 x 10
