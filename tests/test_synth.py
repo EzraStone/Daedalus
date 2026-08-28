@@ -237,3 +237,34 @@ class TestConstraintReporting:
         # Wrong rows *and* over budget is a broken circuit, not a tight one.
         assert not _constraint_only(Fail((RowMismatch(0, 0, 1),), "footprint"))
         assert not _constraint_only(Fail((RowMismatch(0, 0, 1),), None))
+
+
+class TestGateOrdering:
+    """The index tie-break in _topological_order is load-bearing."""
+
+    def test_order_is_deterministic_across_runs(self):
+        # Two Synthesisers on the same netlist must agree, whatever their
+        # generators have been doing. A retry that reorders gates loses
+        # crossbar coverage -- see docs/benchmarks.md.
+        from daedalus.synth.netlist import compile_netlist
+        from daedalus.synth.place import Synthesiser
+
+        spec = make("Q = (A & B) | (!A & C)", "A B C")
+        netlist = compile_netlist(spec)
+        placed = spec.default_placement(random.Random(0))
+        orders = []
+        for seed in range(4):
+            s = Synthesiser(netlist, placed, random.Random(seed))
+            orders.append(s._topological_order())
+        assert len(set(map(tuple, orders))) == 1, orders
+
+    def test_order_respects_depth(self):
+        from daedalus.synth.netlist import compile_netlist
+        from daedalus.synth.place import Synthesiser
+
+        spec = make("Q = !(!(A & B) & C)", "A B C")
+        netlist = compile_netlist(spec)
+        s = Synthesiser(netlist, spec.default_placement(random.Random(0)), random.Random(0))
+        depths = s._inverter_depths()
+        order = s._topological_order()
+        assert [depths[g] for g in order] == sorted(depths[g] for g in order)
