@@ -382,10 +382,11 @@ def cmd_train(args) -> int:
         return 1
 
     cls = AutoregressiveModel if args.model == "ar" else MaskedDiffusionModel
-    cfg = ModelConfig()
     if args.tiny:
         # Enough to prove the wiring on a laptop without an accelerator.
-        cfg = ModelConfig(n_layers=2, d_model=128, n_heads=4, d_ff=256)
+        cfg = ModelConfig(n_layers=2, d_model=128, n_heads=4, d_ff=256, nl_slots=args.nl_slots)
+    else:
+        cfg = ModelConfig(nl_slots=args.nl_slots)
     model = cls(cfg)
 
     device = pick_device(args.device)
@@ -440,6 +441,25 @@ def cmd_sample(args) -> int:
     device = next(model.parameters()).device
     batch = torch.tensor([prefix] * args.k, dtype=torch.long, device=device)
     kwargs = {"steps": args.steps} if hasattr(model, "loss_at") else {}
+
+    if args.prompt:
+        if model.prompts is None:
+            print(
+                "this checkpoint was trained on the spec alone and has no prompt\n"
+                "encoder. Retrain with `--nl-slots 4` to condition on text.",
+                file=sys.stderr,
+            )
+            return 2
+        from .text import encode_prompt
+
+        features = torch.tensor(
+            [encode_prompt(args.prompt, model.cfg.nl_length)] * args.k,
+            dtype=torch.long,
+            device=device,
+        )
+        kwargs["nl_embeddings"] = model.prompts(features)
+        print(f"prompt: {args.prompt}")
+
     bodies = model.sample(
         batch,
         legality=T.legality_mask(placed),
@@ -734,6 +754,12 @@ def main(argv=None) -> int:
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--device", default="auto", help="auto, cpu, cuda, ...")
     p.add_argument("--tiny", action="store_true", help="small config for a CPU wiring check")
+    p.add_argument(
+        "--nl-slots",
+        type=int,
+        default=0,
+        help="condition on the corpus paraphrases as well as the spec (0 = spec only)",
+    )
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_train)
 
@@ -743,6 +769,7 @@ def main(argv=None) -> int:
     p.add_argument("--out", help="write the first verified sample here")
     p.add_argument("-k", type=int, default=8, help="candidates to draw")
     p.add_argument("--steps", type=int, default=24, help="denoising steps (diffusion only)")
+    p.add_argument("--prompt", help="condition on this text as well as the spec")
     p.add_argument("--device", default="auto")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_sample)

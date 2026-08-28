@@ -230,3 +230,43 @@ class TestPower:
         out = capsys.readouterr().out
         assert out.count("game ticks") == 1
         assert "A=1 B=1" in out
+
+
+class TestPromptedSampling:
+    def test_a_spec_only_checkpoint_refuses_a_prompt(self, tmp_path, capsys):
+        # Silently ignoring it would be worse: the sample would look
+        # conditioned and would not be.
+        pytest.importorskip("torch", reason="training is an optional extra")
+        corpus = write_corpus(tmp_path / "corpus")
+        run = tmp_path / "run"
+        main(["train", str(corpus), "--tiny", "--epochs", "1", "--batch-size", "4",
+              "--out", str(run)])
+        capsys.readouterr()
+        assert main(["sample", str(run / "model.pt"), NAND, "-k", "1", "--steps", "2",
+                     "--prompt", "turn it on"]) == 2
+        assert "no prompt" in capsys.readouterr().err
+
+    def test_a_prompted_checkpoint_accepts_one(self, tmp_path, capsys):
+        pytest.importorskip("torch", reason="training is an optional extra")
+        corpus = write_corpus(tmp_path / "corpus")
+        run = tmp_path / "run"
+        assert main(["train", str(corpus), "--tiny", "--nl-slots", "4", "--epochs", "1",
+                     "--batch-size", "4", "--out", str(run)]) == 0
+        capsys.readouterr()
+        code = main(["sample", str(run / "model.pt"), NAND, "-k", "1", "--steps", "2",
+                     "--prompt", "turn the lamp off when both levers are on"])
+        assert code in (0, 1)
+        out = capsys.readouterr().out
+        assert "prompt: turn the lamp off" in out
+
+    def test_the_slot_count_survives_a_checkpoint_round_trip(self, tmp_path):
+        pytest.importorskip("torch", reason="training is an optional extra")
+        from daedalus.train import load_checkpoint
+
+        corpus = write_corpus(tmp_path / "corpus")
+        run = tmp_path / "run"
+        main(["train", str(corpus), "--tiny", "--nl-slots", "4", "--epochs", "1",
+              "--batch-size", "4", "--out", str(run)])
+        model = load_checkpoint(run / "model.pt", device="cpu")
+        assert model.cfg.nl_slots == 4
+        assert model.prompts is not None

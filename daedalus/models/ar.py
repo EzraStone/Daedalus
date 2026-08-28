@@ -76,6 +76,7 @@ if HAVE_TORCH:
             legality=None,
             pinned=None,
             enforce_support=True,
+            nl_embeddings=None,
         ):
             """Generate grids one cell at a time in raster order.
 
@@ -114,7 +115,7 @@ if HAVE_TORCH:
                 if i in owed:
                     tokens[:, pos] = owed.pop(i)
                     continue
-                logits = self(tokens[:, :pos])[:, -1]
+                logits = self(tokens[:, :pos], nl_embeddings)[:, -1]
                 if legality is not None:
                     logits = logits.masked_fill(~legality[i], float("-inf"))
                 if enforce_support:

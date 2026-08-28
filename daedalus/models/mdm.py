@@ -173,6 +173,7 @@ if HAVE_TORCH:
             pinned=None,
             known=None,
             enforce_support=True,
+            nl_embeddings=None,
         ):
             """Confidence-ordered unmasking.
 
@@ -208,7 +209,7 @@ if HAVE_TORCH:
                 frozen[cell] = True
 
             for step in range(steps):
-                logits = self(torch.cat([prefix, body], dim=1))[:, p:]
+                logits = self(torch.cat([prefix, body], dim=1), nl_embeddings)[:, p:]
                 if guidance != 1.0 and uncond_prefix is not None:
                     uncond = self(torch.cat([uncond_prefix, body], dim=1))[:, p:]
                     logits = uncond + guidance * (logits - uncond)
