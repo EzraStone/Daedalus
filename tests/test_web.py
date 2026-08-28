@@ -159,12 +159,17 @@ class TestRoutes:
         assert response.status_code == 400
         assert response.json()["where"] == "parse"
 
-    def test_routing_failure_reports_a_retry_hint(self, client):
+    def test_routing_failure_explains_itself_without_promising_a_retry(self, client):
+        # Measuring says a bigger attempt count buys almost nothing -- 17% at
+        # three attempts against 20% at fifty -- so the hint must not send
+        # anyone to spend minutes on it.
         body = client.post(
             "/api/compile", json={"spec_source": XOR, "seed": 0, "attempts": 4}
         ).json()
         assert not body["ok"]
-        assert "wire crossing" in (body["hint"] or "")
+        hint = body["hint"] or ""
+        assert "structural" in hint
+        assert "attempt count usually will not" in hint
         # Each failed attempt has to say what stage it died at.
         assert all(a["stage"] for a in body["attempts"])
 

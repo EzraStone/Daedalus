@@ -133,7 +133,9 @@ class TestFailurePaths:
             await compile_in(pilot, XOR, attempts="3")
             verdict = pilot.app.query_one("#verdict", Verdict).text
             assert "no verified layout" in verdict
-            assert "wire crossing" in verdict
+            # Not "try more attempts": that was measured and is close to
+            # useless. See docs/benchmarks.md.
+            assert "structural" in verdict
 
     @pytest.mark.asyncio
     async def test_a_bad_spec_does_not_wedge_the_app(self):
