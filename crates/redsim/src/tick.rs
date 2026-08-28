@@ -381,4 +381,89 @@ mod tests {
             assert_eq!(s.latency_rt(), delay as u32, "delay {delay} should cost {delay} rt");
         }
     }
+
+    /// The power field the `power` protocol op exposes.
+    ///
+    /// Levels are computed on the way to every verdict and were discarded;
+    /// once something reads them, the decay along a run becomes the diagnostic
+    /// people actually use, so it has to be exactly one step per block.
+    #[test]
+    fn dust_loses_one_step_of_strength_per_block() {
+        let y = 1;
+        let z = 5;
+        let mut g = Grid::with_substrate();
+        let lever = Pos::new(0, y, z);
+        g.set(lever, Block::Lever { attach: Dir4::East });
+        g.set(Pos::new(1, y, z), Block::Solid);
+        for x in 2..14 {
+            g.set(Pos::new(x, y, z), Block::Wire);
+        }
+
+        let mut sim = Sim::new(Circuit::new(g));
+        sim.set_lever(lever, true);
+        assert!(sim.settle(DEFAULT_MAX_GAME_TICKS).is_settled());
+
+        let dust = &sim.levels().dust;
+        let first = dust[Pos::new(2, y, z).index()];
+        assert_eq!(first, 15, "dust beside a powered block starts full");
+        for step in 0..12 {
+            let x = 2 + step as i32;
+            let want = 15u8.saturating_sub(step);
+            assert_eq!(
+                dust[Pos::new(x, y, z).index()],
+                want,
+                "strength at x={x} should be {want}"
+            );
+        }
+    }
+
+    /// A run longer than fifteen blocks goes dark, which is the whole reason
+    /// the router inserts repeaters -- and the reason reading the field is
+    /// worth doing, since the zero is visible where the failure is not.
+    #[test]
+    fn dust_runs_out_after_fifteen_blocks() {
+        let y = 1;
+        let z = 5;
+        let mut g = Grid::with_substrate();
+        let lever = Pos::new(0, y, z);
+        g.set(lever, Block::Lever { attach: Dir4::East });
+        g.set(Pos::new(1, y, z), Block::Solid);
+        for x in 2..16 {
+            g.set(Pos::new(x, y, z), Block::Wire);
+        }
+
+        let mut sim = Sim::new(Circuit::new(g));
+        sim.set_lever(lever, true);
+        assert!(sim.settle(DEFAULT_MAX_GAME_TICKS).is_settled());
+
+        let dust = &sim.levels().dust;
+        assert!(dust[Pos::new(15, y, z).index()] < 3, "the far end should be nearly dark");
+    }
+
+    /// Nothing that is not dust carries a level, or the field would be
+    /// describing something other than signal strength.
+    #[test]
+    fn only_dust_cells_carry_a_level() {
+        let y = 1;
+        let mut g = Grid::with_substrate();
+        let lever = Pos::new(0, y, 3);
+        g.set(lever, Block::Lever { attach: Dir4::East });
+        g.set(Pos::new(1, y, 3), Block::Solid);
+        g.set(Pos::new(2, y, 3), Block::Wire);
+        g.set(Pos::new(3, y, 3), Block::Lamp);
+
+        let mut sim = Sim::new(Circuit::new(g.clone()));
+        sim.set_lever(lever, true);
+        sim.settle(DEFAULT_MAX_GAME_TICKS);
+
+        for (i, level) in sim.levels().dust.iter().enumerate() {
+            if *level > 0 {
+                assert_eq!(
+                    g.get(Pos::from_index(i)),
+                    Block::Wire,
+                    "cell {i} carries a level but is not dust"
+                );
+            }
+        }
+    }
 }
