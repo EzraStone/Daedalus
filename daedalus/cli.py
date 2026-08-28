@@ -97,9 +97,10 @@ def _load_layout(spec: Spec, path: Path):
     from .grid import Grid
 
     if path.suffix in (".schem", ".litematic"):
-        from .schematic import read_schem
+        from .schematic import read_litematic, read_schem
 
-        grid = read_schem(path)
+        reader = read_litematic if path.suffix == ".litematic" else read_schem
+        grid = reader(path)
         return grid, _placement_from_grid(spec, grid)
 
     blob = json.loads(path.read_text())

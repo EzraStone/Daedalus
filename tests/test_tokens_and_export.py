@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import random
 
 import pytest
 
@@ -316,3 +317,66 @@ class TestSchematicRoundTrip:
         path.write_bytes(dumps({"Width": Short(V.SX)}, "Schematic"))
         with pytest.raises(SchematicError, match="Height"):
             read_schem(path)
+
+
+class TestLitematicRoundTrip:
+    """The bit-packing is the whole difficulty, and it is easy to get subtly wrong."""
+
+    def test_a_written_litematic_reads_back_identical(self, tmp_path):
+        from daedalus.schematic import read_litematic
+
+        grid = Grid.with_substrate()
+        grid.set(4, 1, 4, V.WIRE)
+        grid.set(5, 1, 4, V.torch(V.Attach.WEST))
+        grid.set(6, 1, 4, V.repeater(V.Dir4.EAST, 3))
+        path = write_litematic(grid, tmp_path / "c.litematic")
+        assert read_litematic(path).tokens() == grid.tokens()
+
+    def test_entries_straddling_a_long_boundary_survive(self, tmp_path):
+        # A palette wide enough that the bit width does not divide 64, so
+        # entries cross word boundaries. Getting the straddle wrong corrupts
+        # about one block in sixty-four -- often enough to see, rare enough to
+        # look like something else.
+        from daedalus.schematic import read_litematic
+
+        grid = Grid.with_substrate()
+        rng = random.Random(0)
+        states = [V.WIRE, V.SOLID, V.LAMP, V.torch(V.Attach.FLOOR)]
+        states += [V.repeater(V.Dir4(d), n) for d in range(4) for n in (1, 2, 3, 4)]
+        for _ in range(400):
+            grid.set(rng.randrange(V.SX), 1, rng.randrange(V.SZ), rng.choice(states))
+        path = write_litematic(grid, tmp_path / "wide.litematic")
+        assert read_litematic(path).tokens() == grid.tokens()
+
+    def test_a_litematic_of_the_wrong_size_is_refused(self, tmp_path):
+        from daedalus.schematic import SchematicError, read_litematic
+        from daedalus.schematic.nbt import Int, List, LongArray, dumps
+
+        path = tmp_path / "small.litematic"
+        path.write_bytes(
+            dumps(
+                {
+                    "Regions": {
+                        "r": {
+                            "Size": {"x": Int(4), "y": Int(4), "z": Int(4)},
+                            "BlockStatePalette": List(
+                                [{"Name": "minecraft:air"}], element_id=10
+                            ),
+                            "BlockStates": LongArray([0]),
+                        }
+                    }
+                },
+                "",
+            )
+        )
+        with pytest.raises(SchematicError, match="build volume"):
+            read_litematic(path)
+
+    def test_more_than_one_region_is_refused(self, tmp_path):
+        from daedalus.schematic import SchematicError, read_litematic
+        from daedalus.schematic.nbt import Int, dumps
+
+        path = tmp_path / "two.litematic"
+        path.write_bytes(dumps({"Regions": {"a": {"Size": {"x": Int(1)}}, "b": {}}}, ""))
+        with pytest.raises(SchematicError, match="regions"):
+            read_litematic(path)

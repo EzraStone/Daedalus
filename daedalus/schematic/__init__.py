@@ -249,3 +249,58 @@ def read_schem(path: str | Path) -> Grid:
         z, x = divmod(rest, width)
         grid.set(x, y, z, token)
     return grid
+
+
+def read_litematic(path: str | Path) -> Grid:
+    """Read a Litematica schematic back into a :class:`Grid`.
+
+    The bit-packing is the whole difficulty. Litematica uses the narrowest
+    width that fits the palette, minimum two, and an entry may straddle a long
+    boundary — getting the straddle wrong corrupts roughly one block in
+    sixty-four, which is frequent enough to notice and rare enough to look
+    like a different bug entirely.
+    """
+    _name, root = loads(Path(path).read_bytes())
+    regions = root.get("Regions")
+    if not regions:
+        raise SchematicError("litematic has no regions")
+    if len(regions) > 1:
+        raise SchematicError(f"litematic has {len(regions)} regions; expected one")
+    region = next(iter(regions.values()))
+
+    for key in ("Size", "BlockStatePalette", "BlockStates"):
+        if key not in region:
+            raise SchematicError(f"region has no {key}")
+
+    size = region["Size"]
+    # Litematica records a size with the sign of the selection direction.
+    width, height, length = (abs(size["x"]), abs(size["y"]), abs(size["z"]))
+    if (width, height, length) != (V.SX, V.SY, V.SZ):
+        raise SchematicError(
+            f"litematic is {width}x{height}x{length}, not the "
+            f"{V.SX}x{V.SY}x{V.SZ} build volume"
+        )
+
+    states = [entry["Name"] for entry in region["BlockStatePalette"]]
+    bits = max(2, (len(states) - 1).bit_length())
+    mask = (1 << bits) - 1
+    longs = [v + (1 << 64) if v < 0 else v for v in region["BlockStates"]]
+
+    grid = Grid()
+    for i in range(V.CELLS):
+        start = i * bits
+        word, offset = divmod(start, 64)
+        value = longs[word] >> offset
+        if offset + bits > 64:
+            value |= longs[word + 1] << (64 - offset)
+        value &= mask
+        if value >= len(states):
+            raise SchematicError(f"palette index {value} is out of range")
+        token = V.from_state(states[value])
+        if token == V.AIR:
+            continue
+        # Litematica order is x fastest, then z, then y.
+        y, rest = divmod(i, V.SX * V.SZ)
+        z, x = divmod(rest, V.SX)
+        grid.set(x, y, z, token)
+    return grid
