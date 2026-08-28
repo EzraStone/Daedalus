@@ -195,3 +195,59 @@ class TestUnsatisfiableConstraints:
 
         for spec in sample_unique(_random.Random(0), 40):
             assert spec.constraints.unsatisfiable(spec) is None, spec.source()
+
+
+class TestPromptEncoding:
+    """Prompts into features, for the conditioning path that was only a slot."""
+
+    def test_words_survive_and_noise_does_not(self):
+        from daedalus.text import words
+
+        got = words("4 buttons control one bulb; it is on for 8 of the 16 combinations")
+        assert "buttons" in got and "combinations" in got
+        # Stopwords carry nothing about a circuit and would dominate an average.
+        assert "the" not in got and "of" not in got
+
+    def test_operators_are_features_in_their_own_right(self):
+        # One of the paraphraser's registers quotes the formal expression.
+        # Dropping the symbols would reduce it to a bag of variable names.
+        from daedalus.text import words
+
+        got = words("((!D | !((C | !B))) ^ A)")
+        assert "!" in got and "|" in got and "^" in got
+
+    def test_the_same_word_always_lands_in_the_same_bucket(self):
+        # Python salts hash() per process, so a model trained on Monday would
+        # see different features on Tuesday. This must not use it.
+        from daedalus.text import bucket
+
+        assert bucket("lamp") == bucket("lamp")
+        assert bucket("lamp") != bucket("lever")
+
+    def test_a_prompt_is_padded_to_a_fixed_width(self):
+        from daedalus.text import encode_prompt
+
+        assert len(encode_prompt("turn the lamp on")) == 32
+        assert len(encode_prompt("a " * 200)) == 32
+
+    def test_padding_is_never_a_real_feature(self):
+        # Index 0 means "nothing here". If a word could hash to it, an empty
+        # prompt and a prompt containing that word would look the same.
+        from daedalus.text import BUCKETS, bucket, encode_prompt
+
+        assert set(encode_prompt("")) == {0}
+        assert all(bucket(w) + 1 > 0 for w in ("lamp", "a", "0"))
+        assert max(encode_prompt("lamp lever torch")) <= BUCKETS
+
+    def test_real_corpus_prompts_encode(self):
+        import random as _random
+
+        from daedalus.data import sample_unique
+        from daedalus.data.paraphrase import paraphrase
+        from daedalus.text import encode_prompt
+
+        rng = _random.Random(0)
+        for spec in sample_unique(rng, 8):
+            for prompt in paraphrase(spec, rng, 3):
+                ids = encode_prompt(prompt)
+                assert any(ids), prompt
