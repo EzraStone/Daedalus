@@ -144,6 +144,36 @@ Every window used to advise "try more attempts or another seed" on a routing
 failure. Half of that was wrong and is now corrected — a different seed moves
 the port rows and occasionally helps, a bigger budget does not.
 
+### Why retrying does so little, and one fix that did not work
+
+`_topological_order` sorts gates by `(depth, index)`, which is fully
+deterministic. Every attempt therefore places gates in the *same order* and a
+retry only moves the port rows. Depth is the sole hard constraint — gates at
+equal depth are mutually independent — so shuffling within a depth is
+topologically valid and looked like the obvious way to make retries mean
+something.
+
+It works, in the narrow sense. Sixty random specs:
+
+| attempts | index order | shuffled within depth |
+|---|---|---|
+| 3 | 17% | 17% |
+| 6 | 18% | 20% |
+| 12 | 18% | 22% |
+| 25 | 20% | 22% |
+| 50 | 20% | 22% |
+
+And it is not worth having. On `Q = (A & B) | (!A & C)` — a crossbar netlist,
+which is exactly the class bridges were built for — twelve seeds at twenty
+attempts each go from **2 builds, both bridged, to 0**. Shuffling only on
+retries does not rescue it either: the successes were coming from later
+attempts *under the deterministic order*, so any shuffling loses them.
+
+Index order is load-bearing for crossbars and nobody wrote that down. It is
+written down now, in `_topological_order`, along with these numbers. One
+circuit in sixty is not worth trading the function class the bridge work
+exists to cover, so the change is reverted; the finding is not.
+
 ## Signal probing
 
 `daedalus power` settles a circuit for one input assignment and returns the

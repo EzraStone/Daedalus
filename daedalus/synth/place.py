@@ -562,6 +562,21 @@ class Synthesiser:
         return depth
 
     def _topological_order(self) -> list[int]:
+        """Gates in dependency order, ties broken by index.
+
+        The index tie-break is load-bearing, which is not obvious. Depth is the
+        only hard constraint -- gates at equal depth are mutually independent --
+        so shuffling among them is topologically valid, and doing so makes
+        retries meaningfully different instead of re-placing the same gates in
+        the same order with the ports moved. It lifts the solved fraction of
+        random specs from 20% to 22%.
+
+        It also takes a crossbar spec from two builds in twelve seeds to zero,
+        because the successes come from later attempts under *this* order.
+        Trading the function class the bridging router exists to cover for one
+        circuit in sixty is a bad deal, so the order stays fixed. Measured in
+        docs/benchmarks.md.
+        """
         depths = self._inverter_depths()
         return sorted(range(self.net.n_inverters), key=lambda g: (depths[g], g))
 
