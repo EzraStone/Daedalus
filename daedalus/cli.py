@@ -404,6 +404,7 @@ def cmd_train(args) -> int:
             lr=args.lr,
             seed=args.seed,
             device=args.device,
+            prompt_dropout=args.prompt_dropout,
         ),
         out_dir=args.out,
         val=val_set or None,
@@ -443,6 +444,8 @@ def cmd_sample(args) -> int:
     device = next(model.parameters()).device
     batch = torch.tensor([prefix] * args.k, dtype=torch.long, device=device)
     kwargs = {"steps": args.steps} if hasattr(model, "loss_at") else {}
+    if hasattr(model, "loss_at"):
+        kwargs["guidance"] = args.guidance
 
     if args.prompt:
         if model.prompts is None:
@@ -762,6 +765,12 @@ def main(argv=None) -> int:
         default=0,
         help="condition on the corpus paraphrases as well as the spec (0 = spec only)",
     )
+    p.add_argument(
+        "--prompt-dropout",
+        type=float,
+        default=0.1,
+        help="fraction of prompts blanked, so guidance has an unconditional branch",
+    )
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_train)
 
@@ -772,6 +781,12 @@ def main(argv=None) -> int:
     p.add_argument("-k", type=int, default=8, help="candidates to draw")
     p.add_argument("--steps", type=int, default=24, help="denoising steps (diffusion only)")
     p.add_argument("--prompt", help="condition on this text as well as the spec")
+    p.add_argument(
+        "--guidance",
+        type=float,
+        default=2.0,
+        help="classifier-free guidance strength; 1.0 disables it",
+    )
     p.add_argument("--device", default="auto")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_sample)
