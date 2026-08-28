@@ -197,9 +197,10 @@ def _scope_hint(stage: str) -> str | None:
     """Turn a failure stage into something a person can act on."""
     if stage in ("routing", "placement", "signal"):
         return (
-            "Routing is placement-sensitive. A wire crossing uses a conservative "
-            "seven-cell bridge, so more attempts or another seed can help; dense "
-            "layouts may still exceed the 16x6x16 build volume."
+            "Routing failures here are mostly structural rather than unlucky: "
+            "the solved fraction of random specs barely moves between 3 attempts "
+            "and 50. Another seed changes the port rows and sometimes helps, but "
+            "a bigger attempt count usually will not."
         )
     if stage == "constraint":
         return (

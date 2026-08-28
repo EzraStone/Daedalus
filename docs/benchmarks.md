@@ -111,6 +111,39 @@ undiagnosed regression, and separately ruled out the gate-spreading change in
 and an intermediate value 1.49%). That ruling-out stands; the regression
 framing does not.
 
+### Retrying barely helps
+
+Sixty random specs, same seed, varying only the retry budget:
+
+| attempts | solved | |
+|---|---|---|
+| 3 | 10/60 | 17% |
+| 6 | 11/60 | 18% |
+| 12 | 11/60 | 18% |
+| 25 | 12/60 | 20% |
+| 50 | 12/60 | 20% |
+
+A sixteenfold increase in budget buys two more circuits. Failures are
+structural, not unlucky: the specs that fail are the same ones every time,
+and the router runs out of ideas rather than out of tries.
+
+Where they fail, over 120 specs at 6 attempts each:
+
+```
+247  routing    net N: cannot join N fragments
+192  routing    net N: cannot reach inverter N
+ 32  routing    net N: inverter N has no head-on input face
+ 26  placement  inverter N cannot give net N an output face
+```
+
+Two failures are 92% of the routing total, and both are the same shape of
+problem: a net that has to reach somewhere the geometry does not allow. That
+is where the yield is, and no amount of rerolling will find it.
+
+Every window used to advise "try more attempts or another seed" on a routing
+failure. Half of that was wrong and is now corrected — a different seed moves
+the port rows and occasionally helps, a bigger budget does not.
+
 ## Signal probing
 
 `daedalus power` settles a circuit for one input assignment and returns the

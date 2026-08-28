@@ -35,9 +35,10 @@ def cmd_compile(args) -> int:
         print(f"could not build this spec: {attempt.stage}: {attempt.detail}", file=sys.stderr)
         if attempt.stage in ("routing", "placement"):
             print(
-                "\nRouting is placement-sensitive. Wire crossings use conservative\n"
-                "seven-cell bridges, so try more attempts or another seed; a dense\n"
-                "layout may still exceed the 16x6x16 build volume.",
+                "\nRouting failures are mostly structural rather than unlucky: on a\n"
+                "random spec the solved fraction barely moves between 3 attempts and\n"
+                "50. Another seed changes the port rows and sometimes helps; a bigger\n"
+                "attempt count usually does not. See docs/benchmarks.md.",
                 file=sys.stderr,
             )
         return 1
