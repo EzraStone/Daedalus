@@ -298,3 +298,40 @@ class TestNeighbourTable:
 
         with pytest.raises(KeyError):
             neighbours((V.SX, 0))
+
+
+class TestSinkIndex:
+    """Built once now; it still has to answer what the scan answered."""
+
+    def test_it_agrees_with_the_scan_it_replaced(self):
+        from daedalus.spec import Spec
+        from daedalus.synth import compile_netlist
+        from daedalus.synth.netlist import Driver
+        from daedalus.synth.place import Synthesiser
+
+        for source in (
+            "inputs A B\noutputs Q\nQ = !(A & B)",
+            "inputs A B\noutputs Q\nQ = A ^ B",
+            "inputs A B C\noutputs Q R\nQ = (A & B) | C\nR = !C",
+        ):
+            spec = Spec.parse(source)
+            net = compile_netlist(spec)
+            synth = Synthesiser(net, spec.default_placement(), random.Random(0))
+            drivers = {d for n in net.nets for d in n.drivers} | {
+                Driver("inv", g) for g in range(net.n_inverters)
+            }
+            for d in drivers:
+                want = [s for n in net.nets if d in n.drivers for s in n.sinks]
+                assert synth._sinks_of_driver(d) == want, (source, d)
+
+    def test_an_unknown_driver_still_has_no_sinks(self):
+        from daedalus.spec import Spec
+        from daedalus.synth import compile_netlist
+        from daedalus.synth.netlist import Driver
+        from daedalus.synth.place import Synthesiser
+
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)")
+        synth = Synthesiser(
+            compile_netlist(spec), spec.default_placement(), random.Random(0)
+        )
+        assert synth._sinks_of_driver(Driver("inv", 999)) == []

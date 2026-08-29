@@ -270,6 +270,16 @@ class Synthesiser:
         #: net index -> the cells that must actually see the signal
         self.net_terminals: dict[int, list[Cell]] = {}
         self._depths: dict[int, int] | None = None
+        #: driver -> every sink on every net it drives.
+        #:
+        #: Built once because the netlist does not change during placement.
+        #: The scan it replaces walked every net comparing Driver dataclasses,
+        #: once per candidate site, which was 1.2 million equality calls to
+        #: compile twelve specs -- second only to the neighbour lookup.
+        self._sinks_by_driver: dict[Driver, list[Sink]] = {}
+        for net in self.net.nets:
+            for driver in net.drivers:
+                self._sinks_by_driver.setdefault(driver, []).extend(net.sinks)
 
     # -- top level ---------------------------------------------------------
 
@@ -603,11 +613,8 @@ class Synthesiser:
         return sorted(range(self.net.n_inverters), key=lambda g: (depths[g], g))
 
     def _sinks_of_driver(self, d: Driver) -> list[Sink]:
-        out: list[Sink] = []
-        for net in self.net.nets:
-            if d in net.drivers:
-                out.extend(net.sinks)
-        return out
+        """Every sink on every net ``d`` drives, in net order."""
+        return self._sinks_by_driver.get(d, [])
 
     def _driver_cell(self, d: Driver) -> Cell | None:
         idx = self.driver_comp.get(d)

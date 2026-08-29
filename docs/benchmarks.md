@@ -63,9 +63,9 @@ where a model produces candidates and every one of them needs a verdict. It
 says nothing about how fast a corpus can be built, and optimising it would not
 move corpus generation at all.
 
-#### Two changes worth 23%
+#### Three changes worth 30%
 
-Profiling that 99.9% put two things at the top, neither of them an algorithm.
+Profiling that 99.9% put three things at the top, none of them an algorithm.
 
 `neighbours()` — the four orthogonal cells around a cell — was a generator with
 a bounds test per step, called **2.3 million times** to compile twelve specs.
@@ -77,10 +77,15 @@ read, and `supports`, `footprint`, `wire_hops`, `obstructions` and `place` all
 read it. There are `16 x 16 x 2` possible plans; the geometry is now computed
 once per plan and cached.
 
+`_sinks_of_driver` walked every net comparing `Driver` dataclasses to find the
+sinks one driver feeds — once per candidate site, which is **1.2 million**
+equality calls for twelve specs. The netlist does not change during placement,
+so the index is built once when the synthesiser is constructed.
+
 | | before | after |
 |---|---|---|
-| median per spec | 354 ms | 289 ms |
-| throughput | 3.4 specs/s | 4.2 specs/s |
+| median per spec | 354 ms | 249 ms |
+| throughput | 3.4 specs/s | 4.8 specs/s |
 
 Same seed, same 50 specs, same outcome on every one of them — 11 verified, 35
 routing failures, 3 outside the primitive set, 1 verifier rejection — so this
