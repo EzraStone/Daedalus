@@ -16,7 +16,7 @@ from daedalus.redsim import Pass, Verifier
 from daedalus.spec import Spec
 from daedalus.synth import compile, compile_attempts, compile_many
 from daedalus.synth.library import load
-from daedalus.synth.netlist import MAX_FANOUT, NetlistError, compile_netlist, to_nor_form
+from daedalus.synth.netlist import MAX_FANOUT, compile_netlist, to_nor_form
 from daedalus.synth.place import Stats
 
 #: Gate shapes covered by the procedural compiler regression suite.
@@ -197,15 +197,87 @@ class TestCompilation:
         assert stats.bridged >= 1
 
 
-class TestNetlistErrors:
-    def test_a_spec_the_primitive_set_cannot_express_is_reported(self):
-        # Four separate nets off one driver: a torch has only three faces.
-        spec = Spec.parse(
-            "inputs A B C D E\noutputs Q\n"
-            "Q = (!(A|B) | !(A|C)) | (!(A|D) | !(A|E))"
+class TestFanoutBuffering:
+    """A signal wanted in four places used to be refused outright."""
+
+    CROWDED = (
+        "inputs A B C D E\noutputs Q\n"
+        "Q = (!(A|B) | !(A|C)) | (!(A|D) | !(A|E))"
+    )
+
+    def test_a_spec_that_needs_four_faces_now_compiles(self):
+        net = compile_netlist(Spec.parse(self.CROWDED))
+        assert max(net.fanout().values()) <= MAX_FANOUT
+
+    def test_nothing_is_added_when_nothing_is_crowded(self):
+        from daedalus.synth.netlist import insert_buffers
+
+        net = compile_netlist(Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)"))
+        before = (len(net.nets), net.n_inverters)
+        assert insert_buffers(net) == 0
+        assert (len(net.nets), net.n_inverters) == before
+
+    def test_four_sinks_on_one_net_still_need_no_buffer(self):
+        # The distinction the whole rule rests on. Four *sinks* on one net is
+        # plain dust fanout and costs nothing; four separate *nets* is what a
+        # torch cannot do. Buffering the first case would add two gates to
+        # every circuit that uses a signal more than three times.
+        from daedalus.synth.netlist import insert_buffers
+
+        net = compile_netlist(
+            Spec.parse("inputs A\noutputs P Q R S\nP = !A\nQ = !A\nR = !A\nS = !A")
         )
-        with pytest.raises(NetlistError, match="three free faces|more than"):
-            compile_netlist(spec)
+        assert net.n_inverters == 1
+        assert insert_buffers(net) == 0
+
+    def test_a_buffer_costs_two_inverters(self):
+        # One inverter would be an inverter. The identity needs two, and the
+        # two torch delays are what a buffer costs in the game as well.
+        from daedalus.synth.netlist import insert_buffers
+
+        net = compile_netlist(Spec.parse(self.CROWDED))
+        before = net.n_inverters
+        assert insert_buffers(net) == 0  # compile_netlist already did it
+        assert before == 6  # four inverters for the terms, two for the buffer
+        assert net.depth() == 3  # one term, plus the buffer's two
+
+    def test_the_buffered_circuit_computes_the_right_function(self, verifier):
+        # The only check that matters. A netlist rewrite that is subtly wrong
+        # produces a layout that routes and lies, and the truth table is what
+        # catches it.
+        for source in (
+            "inputs A\noutputs P Q R S\nP = !A\nQ = !A\nR = !A\nS = !A",
+            "inputs A B\noutputs P Q R S\nP = A\nQ = !A\nR = !(A | B)\nS = B",
+            "inputs A B\noutputs P Q R\nP = !A\nQ = !(A | B)\nR = !(A | B)",
+        ):
+            spec = Spec.parse(source)
+            for seed in range(30):
+                attempt = compile(spec, verifier, random.Random(seed), attempts=12)
+                if attempt.ok:
+                    break
+            assert attempt.ok, (source, attempt.stage, attempt.detail)
+
+    def test_buffering_terminates_on_a_very_crowded_driver(self):
+        # Each pass leaves the crowded driver at three and hands the rest to a
+        # buffer that may itself be crowded. It has to converge.
+        net = compile_netlist(
+            Spec.parse(
+                "inputs A B C D E F\noutputs Q R\n"
+                "Q = ((!(A|B) | !(A|C)) | (!(A|D) | !(A|E))) | !(A|F)\n"
+                "R = !A"
+            )
+        )
+        assert max(net.fanout().values()) <= MAX_FANOUT
+
+    def test_the_guard_still_fires_if_buffering_ever_fails(self, monkeypatch):
+        # The rejection this replaced is still the backstop. Without it a bug
+        # in insert_buffers would hand the placer a netlist it cannot build
+        # and the failure would surface as a routing error somewhere else.
+        from daedalus.synth import netlist as module
+
+        monkeypatch.setattr(module, "insert_buffers", lambda _net: 0)
+        with pytest.raises(module.NetlistError, match="after buffering"):
+            compile_netlist(Spec.parse(self.CROWDED))
 
 
 class TestConstraintReporting:

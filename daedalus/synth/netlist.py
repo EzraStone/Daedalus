@@ -235,14 +235,86 @@ def compile_netlist(spec) -> Netlist:
         output_net=output_net,
     )
 
+    insert_buffers(netlist)
     over = {d: c for d, c in netlist.fanout().items() if c > MAX_FANOUT}
-    if over:
+    if over:  # pragma: no cover - insert_buffers is supposed to make this unreachable
         raise NetlistError(
-            f"driver(s) {[str(d) for d in over]} feed more than {MAX_FANOUT} separate "
-            "nets; a torch only has three free faces, so this needs a buffer stage "
-            "(not implemented in v1)"
+            f"driver(s) {[str(d) for d in over]} still feed more than {MAX_FANOUT} "
+            "separate nets after buffering"
         )
     return netlist
+
+
+def _canonical(drivers) -> tuple[Driver, ...]:
+    """Drivers in the order :func:`compile_netlist` stores them."""
+    return tuple(sorted(set(drivers), key=lambda d: (d.kind, d.idx)))
+
+
+def insert_buffers(netlist: Netlist) -> int:
+    """Give over-fanned drivers a buffer, and return how many were added.
+
+    A torch has three usable faces, so one driver can feed three separate nets
+    and no more. A spec that wants a signal in four places used to be refused
+    outright -- twelve percent of random specs, and no number of retries could
+    touch it, because it is a gap in the primitive set rather than bad luck.
+
+    The primitive set can close it without gaining a primitive. Two inverters
+    in series are the identity: feed the crowded driver into a torch, feed that
+    torch into another, and the second torch carries the original signal on a
+    fresh set of three faces. The cost is two cells and two torch delays, which
+    is what a buffer costs in the game as well.
+
+    The crowded driver keeps two of its nets plus the one feeding the buffer;
+    everything else moves. If the buffer is itself over-fanned the next pass
+    buffers it, and since each pass moves at least two fewer nets than the last
+    it terminates.
+    """
+    added = 0
+    while True:
+        over = sorted(
+            (
+                (count, d)
+                for d, count in netlist.fanout().items()
+                if count > MAX_FANOUT
+            ),
+            key=lambda t: (-t[0], t[1].kind, t[1].idx),
+        )
+        if not over:
+            return added
+        _count, crowded = over[0]
+
+        # The net that feeds the buffer. Reusing an existing single-driver net
+        # matters: creating a second one would add to the very fanout being
+        # reduced.
+        solo = _canonical((crowded,))
+        feed = next((i for i, net in enumerate(netlist.nets) if net.drivers == solo), None)
+        if feed is None:
+            netlist.nets.append(Net(drivers=solo))
+            feed = len(netlist.nets) - 1
+
+        first = len(netlist.inverter_input)
+        netlist.nets[feed].sinks.append(Sink("inv", first))
+        netlist.inverter_input.append(feed)
+
+        middle = len(netlist.nets)
+        netlist.nets.append(Net(drivers=_canonical((Driver("inv", first),))))
+        second = first + 1
+        netlist.nets[middle].sinks.append(Sink("inv", second))
+        netlist.inverter_input.append(middle)
+        buffered = Driver("inv", second)
+        added += 2
+
+        # Leave the crowded driver `feed` and two others; move the rest.
+        elsewhere = [
+            i
+            for i, net in enumerate(netlist.nets)
+            if i != feed and i != middle and crowded in net.drivers
+        ]
+        for i in elsewhere[MAX_FANOUT - 1 :]:
+            net = netlist.nets[i]
+            net.drivers = _canonical(
+                d if d != crowded else buffered for d in net.drivers
+            )
 
 
 def _expr_key(expr: Expr) -> str:
