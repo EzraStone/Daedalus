@@ -68,7 +68,7 @@ no README.
 |---|---|
 | `crates/redsim` — the verifier | Complete. 104-case golden suite, 35 tests, 41 µs per evaluation batched (188 µs one at a time — the difference is pipe round-trip, not simulation). |
 | `daedalus.spec` — the DSL | Complete. Full grammar, canonicalisation, semantic hashing byte-identical to the Rust side. |
-| `daedalus.synth` — the procedural compiler | Working. Planar routing plus verified two-level bridges for crossbar netlists. About 4.8 specs/second; the yield gap, not the speed, is the open problem. |
+| `daedalus.synth` — the procedural compiler | Working. Planar routing plus verified two-level bridges for crossbar netlists. About 5.5 specs/second; the yield gap, not the speed, is the open problem. |
 | `daedalus.data` — the corpus engine | Working end to end. Builds, verifies, splits, writes a dataset card. |
 | `daedalus.schematic` — export | Complete. `.schem` and `.litematic`, dependency-free NBT. |
 | `daedalus.eval` — metrics and baselines | Complete. Three of four baselines runnable today. |
