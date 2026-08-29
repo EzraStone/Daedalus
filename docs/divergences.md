@@ -50,6 +50,30 @@ They are extensions, not disagreements with the game:
   is the check that turns the update-order divergence from a silent risk into a
   rejection.
 
+## What the signal view is, and is not
+
+`daedalus power` — and the signal buttons in the web and terminal UIs — ask the
+simulator for the **settled** dust field under one input assignment: hold the
+levers in that position, let the circuit come to rest, then report one strength
+per cell. It is a still photograph of a circuit at rest, not a recording of one
+switching.
+
+Two things follow, and both matter when reading it:
+
+- **There is no propagation to watch.** The intermediate states a signal passes
+  through on its way to rest are computed and discarded. A run of dust does not
+  light up cell by cell; it is either at its settled strength or it is not.
+  Animating the numbers would be inventing frames the simulator never produced.
+- **A cell reading zero is dust with no signal, not the absence of dust.** The
+  field is zero everywhere that is not dust, so a reading is only meaningful
+  read against the layout it came from. Both UIs draw it over the grid for
+  exactly that reason.
+
+`settled` is the honest part of the answer. A circuit the Gray-code pass already
+rejected as history-dependent has no single resting state to photograph, and the
+field comes back with `settled` false rather than with whichever state the
+simulator happened to stop in.
+
 ## How this list is checked
 
 `harness/compare.py` replays generated circuits through a real server and diffs
