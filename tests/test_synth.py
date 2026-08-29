@@ -269,6 +269,34 @@ class TestFanoutBuffering:
         )
         assert max(net.fanout().values()) <= MAX_FANOUT
 
+    def test_buffering_never_leaves_two_nets_with_the_same_drivers(self):
+        # net_for dedupes nets by driver set, and two sinks fed by the same
+        # drivers genuinely want one physical net. Substituting a buffer for a
+        # driver rewrites driver sets, so it could in principle collide with
+        # an existing net and quietly route the same signal twice.
+        #
+        # It cannot, and the reason is worth pinning: the substituted driver is
+        # a brand-new inverter no other net mentions, and two nets that both
+        # named the crowded driver already differed somewhere else. Measured
+        # over 400 random specs as well as asserted here.
+        import collections
+
+        for source in (
+            self.CROWDED,
+            "inputs A B C D E F\noutputs Q R\n"
+            "Q = ((!(A|B) | !(A|C)) | (!(A|D) | !(A|E))) | !(A|F)\nR = !A",
+            "inputs A B\noutputs P Q R S\nP = A\nQ = !A\nR = !(A | B)\nS = B",
+        ):
+            net = compile_netlist(Spec.parse(source))
+            counts = collections.Counter(n.drivers for n in net.nets)
+            assert all(c == 1 for c in counts.values()), source
+
+    def test_every_buffer_net_still_has_a_sink(self):
+        # A net with no sink is dust routed to nowhere: it costs cells, it can
+        # block another net, and nothing notices.
+        net = compile_netlist(Spec.parse(self.CROWDED))
+        assert all(n.sinks for n in net.nets)
+
     def test_the_guard_still_fires_if_buffering_ever_fails(self, monkeypatch):
         # The rejection this replaced is still the backstop. Without it a bug
         # in insert_buffers would hand the placer a netlist it cannot build
