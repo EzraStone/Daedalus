@@ -303,3 +303,28 @@ def test_router_bounds_bridge_search_after_two_committed_spans():
     synth.layout = layout
 
     assert synth._search_bridge({(4, 8)}, {(12, 8)}, net=0) is None
+
+
+class TestGeometryCache:
+    """The shape is computed once now; it still has to be the same shape."""
+
+    def test_the_cached_run_matches_a_fresh_computation(self):
+        # The naive version this replaced, kept here as the oracle.
+        for axis, (dx, dz) in (("x", (1, 0)), ("z", (0, 1))):
+            for crossing in ((8, 8), (3, 12), (12, 3)):
+                plan = BridgePlan(crossing, axis)
+                x0, z0 = crossing
+                want = tuple(
+                    (x0 + o * dx, y, z0 + o * dz)
+                    for o, y in zip(range(-3, 4), (1, 2, 3, 3, 3, 2, 1))
+                )
+                assert plan.dust == want
+                assert plan.supports == tuple((x, y - 1, z) for x, y, z in want[1:-1])
+
+    def test_two_plans_for_the_same_crossing_agree(self):
+        assert BridgePlan((8, 8), "x").dust == BridgePlan((8, 8), "x").dust
+
+    def test_the_axis_still_separates_them(self):
+        # A cache keyed on the crossing alone would collapse these, and the
+        # router would stamp bridges along the wrong axis.
+        assert BridgePlan((8, 8), "x").dust != BridgePlan((8, 8), "z").dust

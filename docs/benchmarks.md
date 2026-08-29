@@ -63,6 +63,30 @@ where a model produces candidates and every one of them needs a verdict. It
 says nothing about how fast a corpus can be built, and optimising it would not
 move corpus generation at all.
 
+#### Two changes worth 23%
+
+Profiling that 99.9% put two things at the top, neither of them an algorithm.
+
+`neighbours()` — the four orthogonal cells around a cell — was a generator with
+a bounds test per step, called **2.3 million times** to compile twelve specs.
+There are 256 cells and the answer never changes, so the whole table is now
+built once at import and the call is a dict lookup.
+
+`BridgePlan.dust` was a property that rebuilt its seven coordinates on every
+read, and `supports`, `footprint`, `wire_hops`, `obstructions` and `place` all
+read it. There are `16 x 16 x 2` possible plans; the geometry is now computed
+once per plan and cached.
+
+| | before | after |
+|---|---|---|
+| median per spec | 354 ms | 289 ms |
+| throughput | 3.4 specs/s | 4.2 specs/s |
+
+Same seed, same 50 specs, same outcome on every one of them — 11 verified, 35
+routing failures, 3 outside the primitive set, 1 verifier rejection — so this
+is the same compiler running faster and not a different one. That equality is
+the only reason to believe the number.
+
 The 0.1% is also flattered by the yield. A spec that never routes never
 reaches the verifier, and seven in ten do not, so most of that wall time is
 the placer failing rather than the verifier waiting. Fixing the routing gap

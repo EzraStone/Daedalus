@@ -8,12 +8,38 @@ the lower wire roofs it, but does not interrupt its flat connections.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 
 from .. import vocab as V
 from ..grid import Grid
 
 Cell = tuple[int, int]
 Voxel = tuple[int, int, int]
+
+
+@cache
+def _geometry(crossing: Cell, axis: str) -> tuple[tuple[Voxel, ...], tuple[Voxel, ...]]:
+    """The dust run and its supports for one crossing, worked out once.
+
+    A plan is immutable and there are only ``16 * 16 * 2`` of them, but `dust`
+    is a property and every reader rebuilt it: `supports`, `footprint`,
+    `wire_hops`, `obstructions` and `place` all go through it, and profiling
+    the compiler put it and its helpers third and fourth. Caching the shape
+    keeps the properties readable and stops the router paying for the same
+    seven coordinates several hundred thousand times.
+
+    Keyed on the fields rather than on the plan so the cache does not hold
+    references to plan objects the router has finished with.
+    """
+    dx, dz = (1, 0) if axis == "x" else (0, 1)
+    x0, z0 = crossing
+    heights = (1, 2, 3, 3, 3, 2, 1)
+    dust = tuple(
+        (x0 + offset * dx, y, z0 + offset * dz)
+        for offset, y in zip(range(-3, 4), heights)
+    )
+    supports = tuple((x, y - 1, z) for x, y, z in dust[1:-1])
+    return dust, supports
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,16 +71,11 @@ class BridgePlan:
 
     @property
     def dust(self) -> tuple[Voxel, ...]:
-        heights = (1, 2, 3, 3, 3, 2, 1)
-        out = []
-        for offset, y in zip(range(-3, 4), heights):
-            x, z = self.cell(offset)
-            out.append((x, y, z))
-        return tuple(out)
+        return _geometry(self.crossing, self.axis)[0]
 
     @property
     def supports(self) -> tuple[Voxel, ...]:
-        return tuple((x, y - 1, z) for x, y, z in self.dust[1:-1])
+        return _geometry(self.crossing, self.axis)[1]
 
     @property
     def footprint(self) -> frozenset[Cell]:

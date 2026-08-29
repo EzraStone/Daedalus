@@ -55,12 +55,34 @@ class RoutingFailure(Exception):
         self.detail = detail
 
 
-def neighbours(c: Cell):
-    x, z = c
-    for dx, dz in _STEPS:
-        nx, nz = x + dx, z + dz
-        if 0 <= nx < V.SX and 0 <= nz < V.SZ:
-            yield (nx, nz)
+#: Every cell's in-bounds orthogonal neighbours, worked out once.
+#:
+#: This used to be a generator over ``_STEPS`` with a bounds test per step, and
+#: it is the single hottest thing in the compiler -- 2.3 million calls to build
+#: twelve specs, each one allocating a frame to yield at most four tuples out of
+#: a set of 256 that never changes. There are only 256 cells, so the whole table
+#: costs a few kilobytes and is built at import.
+_NEIGHBOURS: dict[Cell, tuple[Cell, ...]] = {
+    (x, z): tuple(
+        (x + dx, z + dz)
+        for dx, dz in _STEPS
+        if 0 <= x + dx < V.SX and 0 <= z + dz < V.SZ
+    )
+    for x in range(V.SX)
+    for z in range(V.SZ)
+}
+
+
+def neighbours(c: Cell) -> tuple[Cell, ...]:
+    """The in-bounds cells orthogonally adjacent to ``c``.
+
+    Returns a tuple rather than a generator. Callers iterate it once, and
+    several of them ask for the same cell's neighbours repeatedly.
+
+    ``c`` must itself be in bounds; a cell outside the grid raises rather than
+    coming back empty, since asking for it is a mistake either way.
+    """
+    return _NEIGHBOURS[c]
 
 
 @dataclass(slots=True)

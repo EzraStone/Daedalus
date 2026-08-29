@@ -268,3 +268,33 @@ class TestGateOrdering:
         depths = s._inverter_depths()
         order = s._topological_order()
         assert [depths[g] for g in order] == sorted(depths[g] for g in order)
+
+
+class TestNeighbourTable:
+    """The hottest function in the compiler, now a lookup."""
+
+    def test_every_cell_matches_the_bounds_check_it_replaced(self):
+        from daedalus.synth.place import neighbours
+
+        steps = ((0, -1), (0, 1), (-1, 0), (1, 0))
+        for x in range(V.SX):
+            for z in range(V.SZ):
+                want = tuple(
+                    (x + dx, z + dz)
+                    for dx, dz in steps
+                    if 0 <= x + dx < V.SX and 0 <= z + dz < V.SZ
+                )
+                assert neighbours((x, z)) == want
+
+    def test_corners_have_two_and_the_middle_has_four(self):
+        from daedalus.synth.place import neighbours
+
+        assert len(neighbours((0, 0))) == 2
+        assert len(neighbours((V.SX - 1, V.SZ - 1))) == 2
+        assert len(neighbours((8, 8))) == 4
+
+    def test_a_cell_outside_the_grid_is_an_error_not_an_empty_answer(self):
+        from daedalus.synth.place import neighbours
+
+        with pytest.raises(KeyError):
+            neighbours((V.SX, 0))
