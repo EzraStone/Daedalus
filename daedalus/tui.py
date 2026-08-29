@@ -43,7 +43,7 @@ from . import vocab as V
 from .redsim import Verifier, VerifierError
 from .schematic import block_summary, write_litematic, write_schem
 from .spec import Spec, SpecSyntaxError
-from .synth import Stats, compile_attempts
+from .synth import Stats, compile_attempts, scope_hint, stage_rank
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
@@ -71,31 +71,6 @@ def load_examples() -> list[tuple[str, str]]:
             out.append((title, source))
     return out
 
-
-def scope_hint(stage: str) -> str | None:
-    """Why a failure happened, in terms someone can act on."""
-    if stage in ("routing", "placement", "signal"):
-        return (
-            "Routing failures here are mostly structural rather than unlucky: "
-            "the solved fraction of random specs barely moves between 3 attempts "
-            "and 50. Another seed changes the port rows and sometimes helps, but "
-            "a bigger attempt count usually will not."
-        )
-    if stage == "constraint":
-        return (
-            "The circuit computes the right function but misses a budget the "
-            "spec declared. The placer does not aim for latency or size yet, so "
-            "it is rerolling and hoping -- loosen the constraint, or raise the "
-            "attempt count."
-        )
-    if stage == "netlist":
-        return "The spec is outside the v1 primitive set entirely."
-    if stage == "verify":
-        return (
-            "The placer produced a layout the verifier rejected — roughly a "
-            "quarter are. Retrying usually finds a good one."
-        )
-    return None
 
 
 @dataclass(slots=True)
@@ -308,6 +283,7 @@ class DaedalusApp(App):
         colour = {
             "ok": "#4FBF8B",
             "fail": "#E0A82E",
+            "budget": "#5FB3C4",
             "error": "#F0392C",
             "info": "#A9B4C0",
         }.get(kind, "#A9B4C0")
@@ -450,6 +426,7 @@ class DaedalusApp(App):
 
         stats = Stats()
         last = None
+        failures: list[str] = []
         try:
             for n, attempt in enumerate(
                 compile_attempts(
@@ -458,6 +435,8 @@ class DaedalusApp(App):
                 start=1,
             ):
                 last = attempt
+                if not attempt.ok:
+                    failures.append(attempt.stage)
                 self.call_from_thread(self._show_attempt, n, attempt, spec)
                 if attempt.ok:
                     break
@@ -465,7 +444,7 @@ class DaedalusApp(App):
             self.call_from_thread(self._finish_error, "verifier", str(e))
             return
 
-        self.call_from_thread(self._finish, last, stats)
+        self.call_from_thread(self._finish, last, stats, failures)
 
     # -- UI updates, all on the main thread --------------------------------
 
@@ -502,17 +481,25 @@ class DaedalusApp(App):
                 f"{k} x{v}" for k, v in block_summary(attempt.grid).items()
             )
         else:
-            self.log_line("fail", attempt.stage, attempt.detail, n)
+            # A missed budget means the circuit works. Logging it in the same
+            # colour as a routing failure hides the one distinction the
+            # compiler goes out of its way to draw.
+            if attempt.stage == "constraint":
+                self.log_line("budget", "over budget", attempt.detail, n)
+            else:
+                self.log_line("fail", attempt.stage, attempt.detail, n)
             if attempt.grid is not None:
                 self.query_one("#grid", GridView).tokens = attempt.grid.tokens()
         del spec
 
-    def _finish(self, last, stats: Stats) -> None:
+    def _finish(self, last, stats: Stats, failures: list[str]) -> None:
         self.query_one("#run", Button).disabled = False
         if last is not None and last.ok:
             return
-        stage = last.stage if last else ""
-        hint = scope_hint(stage)
+        # The most informative failure, not the last one -- same choice
+        # `compile` makes, so the pane and the command line agree.
+        worst = max(failures, key=stage_rank, default="")
+        hint = scope_hint(worst)
         self.query_one("#verdict", Verdict).show(
             "fail",
             "no verified layout",

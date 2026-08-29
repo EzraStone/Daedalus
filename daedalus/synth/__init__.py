@@ -37,6 +37,7 @@ __all__ = [
     "compile_netlist",
     "compile_many",
     "load",
+    "scope_hint",
     "stage_rank",
     "synthesise",
 ]
@@ -223,6 +224,42 @@ def stage_rank(stage: str) -> int:
 
 def _informativeness(attempt: Attempt) -> int:
     return stage_rank(attempt.stage)
+
+
+def scope_hint(stage: str) -> str | None:
+    """Why a compile failed, in terms someone can act on.
+
+    One copy, because there were three -- the CLI, the terminal UI and the web
+    UI each carried their own -- and they had already drifted. The command line
+    said nothing at all about a missed budget, and the two UIs disagreed about
+    how often the verifier rejects a routed layout. Whatever these say, they
+    should say to everyone.
+
+    Returns ``None`` for a stage that needs no explanation, including ``"ok"``.
+    """
+    if stage in ("routing", "placement", "signal"):
+        return (
+            "Routing failures here are mostly structural rather than unlucky: "
+            "the solved fraction of random specs barely moves between 3 attempts "
+            "and 50. Another seed changes the port rows and sometimes helps, but "
+            "a bigger attempt count usually will not. See docs/benchmarks.md."
+        )
+    if stage == "constraint":
+        return (
+            "The circuit computes the right function but misses a budget the "
+            "spec declared. The placer does not aim for latency or size yet, so "
+            "it is rerolling and hoping -- loosen the constraint, or raise the "
+            "attempt count."
+        )
+    if stage == "netlist":
+        return "The spec is outside the v1 primitive set entirely."
+    if stage == "verify":
+        return (
+            "The placer produced a layout the verifier rejected. This is the "
+            "verifier doing its job -- roughly a quarter of routed layouts are "
+            "discarded this way. Retrying usually finds a good one."
+        )
+    return None
 
 
 def compile_many(

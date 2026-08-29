@@ -32,15 +32,15 @@ def cmd_compile(args) -> int:
     with Verifier() as v:
         attempt = compile_spec(spec, v, rng, attempts=args.attempts)
     if not attempt.ok:
+        from .synth import scope_hint
+
         print(f"could not build this spec: {attempt.stage}: {attempt.detail}", file=sys.stderr)
-        if attempt.stage in ("routing", "placement"):
-            print(
-                "\nRouting failures are mostly structural rather than unlucky: on a\n"
-                "random spec the solved fraction barely moves between 3 attempts and\n"
-                "50. Another seed changes the port rows and sometimes helps; a bigger\n"
-                "attempt count usually does not. See docs/benchmarks.md.",
-                file=sys.stderr,
-            )
+        # This used to explain routing failures and stay silent about
+        # everything else, so a spec whose circuit worked and merely missed a
+        # declared budget got a bare stage name and no way to act on it.
+        hint = scope_hint(attempt.stage)
+        if hint:
+            print(f"\n{hint}", file=sys.stderr)
         return 1
 
     print(spec.source())

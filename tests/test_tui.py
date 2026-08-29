@@ -9,6 +9,8 @@ shows *no* circuit, and a bad spec does not wedge the app.
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 pytest.importorskip("textual", reason="the terminal window is an optional extra")
@@ -17,6 +19,7 @@ from textual.widgets import Button, Input, Label, RichLog, TextArea  # noqa: E40
 
 from daedalus import render  # noqa: E402
 from daedalus import vocab as V  # noqa: E402
+from daedalus.synth import scope_hint  # noqa: E402
 from daedalus.tui import (  # noqa: E402
     BANNER,
     DaedalusApp,
@@ -24,7 +27,6 @@ from daedalus.tui import (  # noqa: E402
     GridView,
     Verdict,
     load_examples,
-    scope_hint,
 )
 
 NAND = "inputs A B\noutputs Q\nQ = !(A & B)"
@@ -177,6 +179,29 @@ class TestHonesty:
         from daedalus.web.app import examples as web_examples
 
         assert titles == [e["title"] for e in web_examples()]
+
+    @pytest.mark.asyncio
+    async def test_a_budget_miss_reads_as_over_budget_not_as_a_failure(self):
+        # The circuit works. A line saying "constraint" in the same amber as a
+        # routing failure sends someone to rewrite a correct layout.
+        source = "inputs A B C\noutputs Q\nQ = !(A & B) | C\nfootprint <= 34"
+        async with DaedalusApp().run_test() as pilot:
+            await compile_in(pilot, source, attempts="8")
+            log = pilot.app.query_one("#log", RichLog)
+            text = "\n".join(str(line) for line in log.lines)
+        assert "over budget" in text
+        assert "against a budget of 34" in text
+
+    def test_the_three_surfaces_share_one_set_of_hints(self):
+        # There used to be three copies and they had drifted: the command line
+        # said nothing at all about a missed budget, and the two UIs disagreed
+        # about how often the verifier rejects a routed layout.
+        import daedalus.tui as tui
+        import daedalus.web.app as web
+
+        assert "def scope_hint" not in pathlib.Path(tui.__file__).read_text()
+        assert "def scope_hint" not in pathlib.Path(web.__file__).read_text()
+        assert "def _scope_hint" not in pathlib.Path(web.__file__).read_text()
 
     def test_scope_hints_cover_every_failure_stage(self):
         for stage in ("routing", "placement", "signal", "netlist", "verify"):

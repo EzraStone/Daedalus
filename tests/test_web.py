@@ -180,7 +180,7 @@ class TestRoutes:
         # blocks over budget and then rerolled into a routing failure was told
         # to try harder in one place and to raise the budget in the other.
         from daedalus.synth import compile as compile_spec
-        from daedalus.web.app import _scope_hint
+        from daedalus.synth import scope_hint
 
         source = "inputs A B C\noutputs Q\nQ = !(A & B) | C\nfootprint <= 34"
         body = client.post(
@@ -188,7 +188,7 @@ class TestRoutes:
         ).json()
         assert not body["ok"]
         cli = compile_spec(Spec.parse(source), verifier, random.Random(0), attempts=8)
-        assert body["hint"] == _scope_hint(cli.stage)
+        assert body["hint"] == scope_hint(cli.stage)
 
     def test_a_budget_miss_is_not_reported_as_a_routing_failure(self, client):
         # The circuit works. Saying "no verified layout" and pointing at the

@@ -42,7 +42,7 @@ from ..render import LEGEND, occupied_layers, power_colour
 from ..render import palette as display_palette
 from ..schematic import block_summary, write_litematic, write_schem
 from ..spec import PlacedSpec, Spec, SpecSyntaxError
-from ..synth import Attempt, Stats, compile_attempts, stage_rank
+from ..synth import Attempt, Stats, compile_attempts, scope_hint, stage_rank
 from ..synth.netlist import NetlistError, compile_netlist
 
 STATIC = Path(__file__).parent / "static"
@@ -208,33 +208,6 @@ def _worst_stage(attempts: list[dict]) -> str:
     return max(failed, key=lambda a: stage_rank(a.get("stage", ""))).get("stage", "")
 
 
-def _scope_hint(stage: str) -> str | None:
-    """Turn a failure stage into something a person can act on."""
-    if stage in ("routing", "placement", "signal"):
-        return (
-            "Routing failures here are mostly structural rather than unlucky: "
-            "the solved fraction of random specs barely moves between 3 attempts "
-            "and 50. Another seed changes the port rows and sometimes helps, but "
-            "a bigger attempt count usually will not."
-        )
-    if stage == "constraint":
-        return (
-            "The circuit computes the right function but misses a budget the "
-            "spec declared. The placer does not aim for latency or size yet, so "
-            "it is rerolling and hoping -- loosen the constraint, or raise the "
-            "attempt count."
-        )
-    if stage == "netlist":
-        return "The spec is outside the v1 primitive set entirely."
-    if stage == "verify":
-        return (
-            "The placer produced a layout the verifier rejected. This is the "
-            "verifier doing its job — roughly a quarter of routed layouts are "
-            "discarded this way. Retrying usually finds a good one."
-        )
-    return None
-
-
 # --------------------------------------------------------------------------
 # routes
 # --------------------------------------------------------------------------
@@ -317,7 +290,7 @@ def compile_once(request: CompileRequest) -> JSONResponse:
             "spec": _spec_payload(parsed),
             "attempts": attempts,
             "stats": stats.as_dict(),
-            "hint": None if final.get("ok") else _scope_hint(_worst_stage(attempts)),
+            "hint": None if final.get("ok") else scope_hint(_worst_stage(attempts)),
         }
     )
 
@@ -403,7 +376,7 @@ async def _run_stream(socket: WebSocket, request: CompileRequest) -> None:
             "event": "done",
             "ok": bool(last and last.get("ok")),
             "stats": stats.as_dict(),
-            "hint": None if (last and last.get("ok")) else _scope_hint(_worst_stage(seen)),
+            "hint": None if (last and last.get("ok")) else scope_hint(_worst_stage(seen)),
         }
     )
 
