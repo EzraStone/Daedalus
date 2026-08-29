@@ -336,6 +336,34 @@ class TestBench:
         assert "netlist, placement and routing" in out
         assert "stages:" in out
 
+    def test_compiler_mode_groups_failures_by_shape(self, capsys):
+        # The stage alone says "routing" for problems needing different fixes,
+        # and the raw detail says "net 3" and "net 5" for the same one. The
+        # shape is what makes the breakdown countable.
+        assert main(["bench", "--compiler", "--specs", "12", "--attempts", "3"]) == 0
+        out = capsys.readouterr().out
+        assert "yield by gate count" in out
+        if "failure shapes:" in out:
+            body = out.split("failure shapes:")[1]
+            # Indices are replaced, so no shape carries a bare number.
+            for line in body.strip().splitlines():
+                if not line.strip():
+                    break
+                _count, shape = line.split(None, 1)
+                assert not any(c.isdigit() for c in shape), shape
+
+    def test_failure_shapes_collapse_the_indices(self):
+        from daedalus.cli import _failure_shape
+
+        a = _failure_shape("routing", "net 3: cannot reach inverter 1")
+        b = _failure_shape("routing", "net 12: cannot reach inverter 7")
+        assert a == b == "routing: net N: cannot reach inverter N"
+
+    def test_a_failure_with_no_detail_still_has_a_shape(self):
+        from daedalus.cli import _failure_shape
+
+        assert _failure_shape("placement", "") == "placement: placement"
+
     def test_the_default_mode_still_measures_the_verifier(self, capsys):
         assert main(["bench", "--batch", "4", "--repeats", "2"]) == 0
         assert "evaluations/second" in capsys.readouterr().out
