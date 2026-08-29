@@ -64,6 +64,47 @@ corpus the compiler built, so it inherits the compiler's coverage and cannot
 exceed it. Diversity separates them — the compiler finds several distinct
 layouts per solved spec, retrieval finds one by construction.
 
+### The prompted-LLM baseline was measuring its own format
+
+The one baseline that cannot be run here is also the one most easily made
+unfair by accident, and two ways it was were found by testing the parser
+rather than the model.
+
+The parser dropped any line containing a character outside the block
+alphabet. That is the right rule for a stray `x` in the middle of a grid, and
+the wrong rule for the four spaces markdown puts in front of a fenced code
+block: the indentation made every one of the sixteen lines illegal, and the
+reply was counted as prose. Indentation moves no blocks, so it now goes the
+way trailing whitespace already did. Strictness about the grid itself is
+unchanged — one unknown character still rejects the whole reply, and two grids
+in one reply are still refused rather than guessed between.
+
+The renderer was worse, because it was silent. `render_ascii_layer` exists to
+turn known-good circuits into few-shot examples, and it drew one character per
+block *kind*: all five torch attachments as `t`, all sixteen repeater states as
+`>`. Rendering a working NAND and reading it straight back produced a grid the
+verifier called **malformed** — the torch that had been held up by the block to
+its east was now attached to air. Every few-shot prompt built this way was
+teaching the model a layout that cannot be graded.
+
+Over twelve compiled circuits, before and after:
+
+| | before | after |
+|---|---|---|
+| round-trips to byte identity | 0 | 8 |
+| refused as inexpressible | 0 | 3 |
+| silently changed | 12 | 0 |
+
+The alphabet now spells out torch attachment and repeater facing, which are the
+only two states the placer varies. The three refusals are circuits that bridge
+over themselves at `y=2`; one layer of characters cannot say so, and saying
+nothing was the bug. A test asserts the prompt and the parser describe the same
+alphabet, since a character the grader accepts but the prompt never mentions is
+a point the baseline cannot score.
+
+None of this changes a measured number — the baseline still has not been run.
+It changes whether the number, when it exists, will be about the model.
+
 ## Corpus yield
 
 `daedalus corpus` samples a spec, synthesises a layout, and keeps it only if
