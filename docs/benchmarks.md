@@ -63,9 +63,9 @@ where a model produces candidates and every one of them needs a verdict. It
 says nothing about how fast a corpus can be built, and optimising it would not
 move corpus generation at all.
 
-#### Three changes worth 30%
+#### Four changes worth 39%
 
-Profiling that 99.9% put three things at the top, none of them an algorithm.
+Profiling that 99.9% put four things at the top, none of them an algorithm.
 
 `neighbours()` — the four orthogonal cells around a cell — was a generator with
 a bounds test per step, called **2.3 million times** to compile twelve specs.
@@ -82,15 +82,21 @@ sinks one driver feeds — once per candidate site, which is **1.2 million**
 equality calls for twelve specs. The netlist does not change during placement,
 so the index is built once when the synthesiser is constructed.
 
+`can_hold_dust` — asked for nearly every cell the router considers — called
+`net_at` and `component_at` in turn for each neighbour, and each did its own
+dictionary lookup for the same cell. A cell can only be one of the two things,
+so it is one lookup now. `_site_is_clear` was building a two-element set per
+call, 150,000 times a run, to test membership of the gate's own cells.
+
 | | before | after |
 |---|---|---|
-| median per spec | 354 ms | 249 ms |
-| throughput | 3.4 specs/s | 4.8 specs/s |
+| median per spec | 354 ms | 217 ms |
+| throughput | 3.4 specs/s | 5.5 specs/s |
 
-Same seed, same 50 specs, same outcome on every one of them — 11 verified, 35
-routing failures, 3 outside the primitive set, 1 verifier rejection — so this
-is the same compiler running faster and not a different one. That equality is
-the only reason to believe the number.
+Checked by fingerprint rather than by eye: compiling 200 specs at seed 11 on
+the tree before any of this and on the tree after gives the same SHA-256 over
+every stage, every failure detail and every grid produced —
+`28bc9fb9ca1e6d3a` both times. Same compiler, 39% less time.
 
 The 0.1% is also flattered by the yield. A spec that never routes never
 reaches the verifier, and seven in ten do not, so most of that wall time is

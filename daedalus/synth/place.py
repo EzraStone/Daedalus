@@ -139,12 +139,21 @@ class Layout:
         """May ``net`` place dust here without changing anything else's behaviour?"""
         if cell in self.frozen or cell in self.occupied:
             return False
+        # One lookup per neighbour rather than two. This used to ask net_at
+        # and component_at in turn, and each of them did its own dict get for
+        # the same cell -- on the second-hottest path in the compiler, for a
+        # cell that can only be one of the two things.
+        occupied = self.occupied
+        components = self.components
         for n in neighbours(cell):
-            other = self.net_at(n)
-            if other is not None and other != net:
-                return False  # would merge two nets
-            comp = self.component_at(n)
-            if comp is not None and net not in comp.nets:
+            entry = occupied.get(n)
+            if entry is None:
+                continue
+            kind, idx = entry
+            if kind == "dust":
+                if idx != net:
+                    return False  # would merge two nets
+            elif net not in components[idx].nets:
                 return False  # would power, or be powered by, a stranger
         return True
 
@@ -495,12 +504,12 @@ class Synthesiser:
         for c in cells:
             if not _inside(c) or not self.layout.is_free(c) or c in self.layout.frozen:
                 return False
-        occupied = set(cells)
+        # `cells` is the gate's two cells, so a membership test on the list
+        # beats allocating a set for it 150,000 times a run.
+        free = self.layout.occupied
         for c in cells:
             for n in neighbours(c):
-                if n in occupied:
-                    continue
-                if not self.layout.is_free(n):
+                if n not in cells and n in free:
                     return False
         # Reserve the router's minimum needs at placement time. A gate needs at
         # least one input face whose head-on approach cell is also free, and at
