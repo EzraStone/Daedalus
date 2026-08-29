@@ -98,6 +98,10 @@ button.ghost:disabled{color:var(--ink-dim)}
 .entry .n{color:#4C5763}
 .entry.ok .msg{color:var(--pass)}
 .entry.fail .msg{color:var(--warn)}
+/* A budget miss is a working circuit, not a failed one. Colouring it like
+   the rest of the failures buried the one distinction the compiler goes out
+   of its way to draw. */
+.entry.budget .msg{color:var(--cool)}
 .entry.error .msg{color:var(--live)}
 .entry.info .msg{color:var(--ink-2)}
 .entry .detail{color:var(--ink-dim);display:block}
@@ -561,7 +565,13 @@ function handle(message) {
         setVerdict("pass", message.verdict, `attempt ${message.n}`);
         showResult(message);
       } else {
-        log("fail", message.stage, message.detail, message.n);
+        const budget = message.stage === "constraint";
+        log(
+          budget ? "budget" : "fail",
+          budget ? "over budget" : message.stage,
+          message.detail,
+          message.n
+        );
         if (message.tokens) showResult(message);
       }
       break;

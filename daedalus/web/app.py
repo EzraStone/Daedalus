@@ -42,7 +42,7 @@ from ..render import LEGEND, occupied_layers, power_colour
 from ..render import palette as display_palette
 from ..schematic import block_summary, write_litematic, write_schem
 from ..spec import PlacedSpec, Spec, SpecSyntaxError
-from ..synth import Attempt, Stats, compile_attempts
+from ..synth import Attempt, Stats, compile_attempts, stage_rank
 from ..synth.netlist import NetlistError, compile_netlist
 
 STATIC = Path(__file__).parent / "static"
@@ -193,6 +193,21 @@ def _attempt_payload(n: int, attempt: Attempt) -> dict:
     return payload
 
 
+def _worst_stage(attempts: list[dict]) -> str:
+    """The stage of the most informative failure, matching what the CLI says.
+
+    Both surfaces run the same compiler over the same spec, so they had better
+    give the same advice. Reporting whichever attempt happened to be last means
+    a run that built a working circuit two blocks over budget and then rerolled
+    into a routing failure is told to try harder, when what it should be told is
+    that the budget is the problem.
+    """
+    failed = [a for a in attempts if not a.get("ok")]
+    if not failed:
+        return ""
+    return max(failed, key=lambda a: stage_rank(a.get("stage", ""))).get("stage", "")
+
+
 def _scope_hint(stage: str) -> str | None:
     """Turn a failure stage into something a person can act on."""
     if stage in ("routing", "placement", "signal"):
@@ -302,7 +317,7 @@ def compile_once(request: CompileRequest) -> JSONResponse:
             "spec": _spec_payload(parsed),
             "attempts": attempts,
             "stats": stats.as_dict(),
-            "hint": None if final.get("ok") else _scope_hint(final.get("stage", "")),
+            "hint": None if final.get("ok") else _scope_hint(_worst_stage(attempts)),
         }
     )
 
@@ -372,12 +387,14 @@ async def _run_stream(socket: WebSocket, request: CompileRequest) -> None:
 
     task = loop.run_in_executor(None, work)
     last: dict | None = None
+    seen: list[dict] = []
     while True:
         message = await queue.get()
         if message is None:
             break
         if message.get("event") == "attempt":
             last = message
+            seen.append(message)
         await socket.send_json(message)
     await task
 
@@ -386,7 +403,7 @@ async def _run_stream(socket: WebSocket, request: CompileRequest) -> None:
             "event": "done",
             "ok": bool(last and last.get("ok")),
             "stats": stats.as_dict(),
-            "hint": None if (last and last.get("ok")) else _scope_hint((last or {}).get("stage", "")),
+            "hint": None if (last and last.get("ok")) else _scope_hint(_worst_stage(seen)),
         }
     )
 

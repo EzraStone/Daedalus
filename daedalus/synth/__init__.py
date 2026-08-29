@@ -37,6 +37,7 @@ __all__ = [
     "compile_netlist",
     "compile_many",
     "load",
+    "stage_rank",
     "synthesise",
 ]
 
@@ -208,8 +209,20 @@ _STAGE_RANK = {
 }
 
 
+def stage_rank(stage: str) -> int:
+    """How much a failure at ``stage`` tells you, worst to best.
+
+    Public because the compiler is not the only thing that has to choose which
+    of several failures to report. The web UI shows every attempt as it happens
+    and then has to say one thing about the run as a whole; picking the last
+    attempt there while :func:`compile` picks the most informative one meant
+    the CLI and the browser gave different advice about the same spec.
+    """
+    return _STAGE_RANK.get(stage, 0)
+
+
 def _informativeness(attempt: Attempt) -> int:
-    return _STAGE_RANK.get(attempt.stage, 0)
+    return stage_rank(attempt.stage)
 
 
 def compile_many(

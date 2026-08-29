@@ -173,6 +173,38 @@ class TestRoutes:
         # Each failed attempt has to say what stage it died at.
         assert all(a["stage"] for a in body["attempts"])
 
+    def test_the_hint_matches_the_advice_the_cli_gives(self, client, verifier):
+        # Same compiler, same spec, two surfaces. The browser used to report
+        # whichever attempt happened to be last while `compile` reports the
+        # most informative one, so a run that produced a working circuit two
+        # blocks over budget and then rerolled into a routing failure was told
+        # to try harder in one place and to raise the budget in the other.
+        from daedalus.synth import compile as compile_spec
+        from daedalus.web.app import _scope_hint
+
+        source = "inputs A B C\noutputs Q\nQ = !(A & B) | C\nfootprint <= 34"
+        body = client.post(
+            "/api/compile", json={"spec_source": source, "seed": 0, "attempts": 8}
+        ).json()
+        assert not body["ok"]
+        cli = compile_spec(Spec.parse(source), verifier, random.Random(0), attempts=8)
+        assert body["hint"] == _scope_hint(cli.stage)
+
+    def test_a_budget_miss_is_not_reported_as_a_routing_failure(self, client):
+        # The circuit works. Saying "no verified layout" and pointing at the
+        # placer sends someone to rewrite a layout that is already correct.
+        body = client.post(
+            "/api/compile",
+            json={
+                "spec_source": "inputs A B C\noutputs Q\nQ = !(A & B) | C\nfootprint <= 34",
+                "seed": 0,
+                "attempts": 8,
+            },
+        ).json()
+        stages = {a["stage"] for a in body["attempts"]}
+        assert "constraint" in stages
+        assert "budget" in (body["hint"] or "")
+
     def test_attempts_budget_is_capped(self, client):
         # A browser tab should not be able to pin a core by typing a big number.
         response = client.post(
