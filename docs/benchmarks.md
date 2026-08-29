@@ -347,6 +347,29 @@ near full when they fire — they are about a net's pieces ending up in regions
 the router cannot connect after earlier nets have been committed. That points
 at ordering and at the greedy commit, not at the grid being too small.
 
+### An obvious fix for the biggest shape, which does nothing
+
+`_ensure_sources` joins a net's fragments by sorting them largest first and
+trying to connect the largest to each of the others. If the largest reaches
+none of them it gives up — even though two smaller fragments might connect to
+each other, which would reduce the count and perhaps unblock the next pass.
+Trying every pair instead is four lines.
+
+Over the same 200 specs it changes nothing at all:
+
+| | head-to-others | every pair |
+|---|---|---|
+| solved | 27 | 27 |
+| cannot reach inverter | 76 | 76 |
+| cannot join fragments | 75 | 75 |
+| no head-on input face | 17 | 17 |
+
+Not "roughly the same" — the same failure on the same spec, every time. When
+the largest fragment cannot reach anything, no pair can, because fragments are
+separated by committed cells rather than by distance and the separation is
+effectively transitive. Reverted. Recorded because it is the first thing
+anyone looking at that error message will try.
+
 None of this is fixed here. It is written down because "20% yield" was being
 treated as a property of the problem, and it is three separate problems with
 three different fixes.
