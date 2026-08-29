@@ -33,6 +33,42 @@ governs how long a round takes.
 A round of 20,000 specs at 64 candidates is 1.28M evaluations, or about a
 minute of verification.
 
+### The verifier is not what makes building a corpus slow
+
+The number above is easy to read as the cost of producing a circuit. It is not.
+`daedalus bench --compiler` compiles random specs end to end and reports the
+split:
+
+```
+$ daedalus bench --compiler --specs 50 --seed 7
+```
+
+| | |
+|---|---|
+| median | 354 ms per spec |
+| mean | 293 ms |
+| throughput | 3.4 specs/second |
+| yield | 0.220 |
+| time inside the verifier | 10 ms of ~14.7 s, **0.1%** |
+
+Stages over those 50: 11 verified, 35 failed to route, 3 were outside the
+primitive set, 1 was rejected by the verifier.
+
+So the ratio is roughly four thousand to one the other way: a verdict costs
+tens of microseconds and a layout costs a third of a second, all of it in
+Python — netlist construction, placement, and Lee routing. Two things follow.
+
+The verifier being cheap is what makes it usable *inside a training loop*,
+where a model produces candidates and every one of them needs a verdict. It
+says nothing about how fast a corpus can be built, and optimising it would not
+move corpus generation at all.
+
+The 0.1% is also flattered by the yield. A spec that never routes never
+reaches the verifier, and seven in ten do not, so most of that wall time is
+the placer failing rather than the verifier waiting. Fixing the routing gap
+would raise the verifier's share — which is the right direction, and still
+nowhere near the point where it matters.
+
 ## Baselines
 
 `daedalus baselines --specs 15 --k 8 --attempts 12`, seed 0. The prompted-LLM

@@ -354,6 +354,93 @@ def cmd_bench(args) -> int:
     return 0
 
 
+class _TimedVerifier:
+    """A verifier that records how long it was inside the worker.
+
+    Wrapping rather than instrumenting the real class: the timing is only
+    wanted here, and a stopwatch left in :class:`Verifier` would be paid for by
+    every caller, including the loop this is meant to describe.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.seconds = 0.0
+        self.calls = 0
+
+    def __getattr__(self, name):
+        import time
+
+        attr = getattr(self._inner, name)
+        if not callable(attr):
+            return attr
+
+        def timed(*a, **kw):
+            started = time.perf_counter()
+            try:
+                return attr(*a, **kw)
+            finally:
+                self.seconds += time.perf_counter() - started
+                self.calls += 1
+
+        return timed
+
+
+def cmd_bench_compiler(args) -> int:
+    """Measure end-to-end compiler throughput, and where the time goes.
+
+    The verifier number this command's other mode reports is easy to read as
+    the cost of building a circuit, and it is not: a verdict is microseconds
+    and a layout is milliseconds. Reporting the split says which half is worth
+    optimising, which is the only reason to measure either.
+    """
+    import statistics
+    import time
+
+    from .data import sample_unique
+    from .synth import compile as compile_spec
+
+    specs = sample_unique(random.Random(args.seed), args.specs)
+    per_spec: list[float] = []
+    solved = 0
+    stages: dict[str, int] = {}
+    with Verifier() as inner:
+        timed = _TimedVerifier(inner)
+        # Warm the worker so its first-call cost is not charged to the first
+        # spec, which would otherwise dominate a small sample.
+        compile_spec(specs[0], timed, random.Random(0), attempts=2)
+        timed.seconds = 0.0
+        timed.calls = 0
+
+        wall_started = time.perf_counter()
+        for i, spec in enumerate(specs):
+            started = time.perf_counter()
+            attempt = compile_spec(spec, timed, random.Random(args.seed + i), attempts=args.attempts)
+            per_spec.append(time.perf_counter() - started)
+            solved += attempt.ok
+            stages[attempt.stage] = stages.get(attempt.stage, 0) + 1
+        wall = time.perf_counter() - wall_started
+
+    millis = sorted(x * 1e3 for x in per_spec)
+    print(f"{args.specs} random specs, up to {args.attempts} attempts each\n")
+    print(f"  median   {statistics.median(millis):8.1f} ms/spec")
+    print(f"  mean     {statistics.fmean(millis):8.1f} ms")
+    print(f"  fastest  {millis[0]:8.1f} ms")
+    print(f"  slowest  {millis[-1]:8.1f} ms")
+    print(f"\n  {args.specs / wall:,.1f} specs/second   yield {solved / args.specs:.3f}")
+    share = timed.seconds / wall if wall else 0.0
+    print(
+        f"\n  {timed.calls} verifier call(s), {timed.seconds * 1e3:.0f} ms total"
+        f" — {share:.1%} of wall time"
+    )
+    print(f"  the other {1 - share:.1%} is netlist, placement and routing, in Python.")
+    print("\nstages: " + ", ".join(f"{k} {n}" for k, n in sorted(stages.items())))
+    print(
+        "\nA spec that never routes never reaches the verifier, so the share above\n"
+        "is low partly because most specs fail before it is asked anything."
+    )
+    return 0
+
+
 def _need_torch() -> bool:
     from .models import HAVE_TORCH
 
@@ -868,7 +955,15 @@ def main(argv=None) -> int:
     p.add_argument("--batch", type=int, default=64, help="grids per request")
     p.add_argument("--repeats", type=int, default=50)
     p.add_argument("--seed", type=int, default=0)
-    p.set_defaults(func=cmd_bench)
+    p.add_argument(
+        "--compiler",
+        action="store_true",
+        help="measure end-to-end compiler throughput instead, and the share of it "
+        "that is actually the verifier",
+    )
+    p.add_argument("--specs", type=int, default=25, help="specs to compile (--compiler)")
+    p.add_argument("--attempts", type=int, default=8, help="retries per spec (--compiler)")
+    p.set_defaults(func=lambda a: cmd_bench_compiler(a) if a.compiler else cmd_bench(a))
 
     p = sub.add_parser("loop", help="run the verifier-guided self-improvement rounds")
     p.add_argument("checkpoint", help="a model.pt to start from")

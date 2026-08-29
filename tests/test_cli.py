@@ -272,6 +272,23 @@ class TestPromptedSampling:
         assert model.prompts is not None
 
 
+class TestBench:
+    def test_compiler_mode_reports_where_the_time_goes(self, capsys):
+        # The point of the mode. A verdict costs microseconds and a layout
+        # costs milliseconds, and reporting only the first invites the reading
+        # that the verifier is what makes corpus building slow.
+        assert main(["bench", "--compiler", "--specs", "4", "--attempts", "3"]) == 0
+        out = capsys.readouterr().out
+        assert "specs/second" in out
+        assert "of wall time" in out
+        assert "netlist, placement and routing" in out
+        assert "stages:" in out
+
+    def test_the_default_mode_still_measures_the_verifier(self, capsys):
+        assert main(["bench", "--batch", "4", "--repeats", "2"]) == 0
+        assert "evaluations/second" in capsys.readouterr().out
+
+
 class TestRepairRate:
     def test_a_batch_reports_a_rate_rather_than_one_outcome(self, tmp_path, capsys):
         pytest.importorskip("torch", reason="training is an optional extra")
