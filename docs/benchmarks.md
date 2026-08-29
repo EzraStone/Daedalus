@@ -280,6 +280,60 @@ written down now, in `_topological_order`, along with these numbers. One
 circuit in sixty is not worth trading the function class the bridge work
 exists to cover, so the change is reverted; the finding is not.
 
+## Why specs fail, in the compiler's own words
+
+The yield number has been reported since the corpus engine existed; what it is
+made of has not. 200 random specs, seed 11, 8 attempts each, the most
+informative failure per spec:
+
+| count | stage | shape |
+|---|---|---|
+| 67 | routing | `net N: cannot reach inverter N` |
+| 64 | routing | `net N: cannot join N fragments` |
+| 21 | netlist | driver feeds more than 3 separate nets |
+| 13 | routing | `net N: inverter N has no head-on input face` |
+| 3 | routing | `net N: cannot reach output N` |
+| 2 | ports | input cannot be given a face |
+| 3 | netlist | (fan-out again, several drivers named) |
+
+And by size:
+
+| gates | solved | of | yield |
+|---|---|---|---|
+| 1 | 1 | 2 | 0.50 |
+| 2 | 5 | 14 | 0.36 |
+| 3 | 7 | 45 | 0.16 |
+| 4 | 7 | 53 | 0.13 |
+| 5 | 5 | 51 | 0.10 |
+| 6 | 2 | 35 | 0.06 |
+| **all** | **27** | **200** | **0.135** |
+
+Three things this says that the single number did not.
+
+**Yield is a function of size, not a constant.** It falls by roughly a factor
+of eight between one gate and six, and it is still falling at six. A corpus
+built this way is therefore biased small, and any model trained on it inherits
+that bias — which matters for the extrapolation split specifically, since
+"harder than anything in training" is exactly what it is meant to test.
+
+**Twelve percent of specs never reach the placer at all.** A driver feeding
+more than three separate nets is refused by `compile_netlist`, because a torch
+has three free faces and nothing in the v1 primitive set buffers a signal to
+widen that. This is not bad luck and no number of retries touches it: it is a
+gap in the primitive set, and the fix is a fan-out buffer rather than a better
+router. It is also the cheapest of the three to close.
+
+**The routing failures are two shapes, both connectivity.** `cannot reach
+inverter` and `cannot join fragments` are 131 of the 152 routing failures
+between them. Neither is about running out of *space* — the board is nowhere
+near full when they fire — they are about a net's pieces ending up in regions
+the router cannot connect after earlier nets have been committed. That points
+at ordering and at the greedy commit, not at the grid being too small.
+
+None of this is fixed here. It is written down because "20% yield" was being
+treated as a property of the problem, and it is three separate problems with
+three different fixes.
+
 ## Signal probing
 
 `daedalus power` settles a circuit for one input assignment and returns the
