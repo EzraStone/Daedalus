@@ -289,35 +289,40 @@ exists to cover, so the change is reverted; the finding is not.
 ## Why specs fail, in the compiler's own words
 
 The yield number has been reported since the corpus engine existed; what it is
-made of has not. 200 random specs, seed 11, 8 attempts each, the most
-informative failure per spec:
+made of has not.
 
-| count | stage | shape | after buffering |
-|---|---|---|---|
-| 67 | routing | `net N: cannot reach inverter N` | 76 |
-| 64 | routing | `net N: cannot join N fragments` | 75 |
-| 21 | netlist | driver feeds more than 3 separate nets | 0 |
-| 13 | routing | `net N: inverter N has no head-on input face` | 17 |
-| 3 | routing | `net N: cannot reach output N` | 3 |
-| 2 | ports | input cannot be given a face | 2 |
-| 3 | netlist | (fan-out again, several drivers named) | 0 |
+```
+$ daedalus bench --compiler --specs 200 --seed 11 --attempts 8
+```
 
-And by size:
+The command groups failures by *shape* — the placer's own words with the
+indices replaced, so "cannot reach inverter 1" and "cannot reach inverter 2"
+count as one problem — and reports yield by gate count. Everything below comes
+out of that one command, so it can be rerun rather than believed.
+
+| count | shape |
+|---|---|
+| 91 | `routing: net N: cannot join N fragments` |
+| 68 | `routing: net N: cannot reach inverter N` |
+| 9 | `routing: net N: inverter N has no head-on input face` |
+| 1 | `routing: net N: output N terminal is blocked` |
+| 1 | `constraint: region NxN against a budget of NxN` |
+| 1 | `verify: Unstable(period_ticks=N)` |
 
 | gates | solved | of | yield |
 |---|---|---|---|
 | 1 | 1 | 2 | 0.50 |
 | 2 | 5 | 14 | 0.36 |
-| 3 | 7 | 45 | 0.16 |
+| 3 | 8 | 45 | 0.18 |
 | 4 | 7 | 53 | 0.13 |
-| 5 | 5 | 51 | 0.10 |
-| 6 | 2 | 35 | 0.06 |
-| **all** | **27** | **200** | **0.135** |
+| 5 | 7 | 51 | 0.14 |
+| 6 | 1 | 35 | 0.03 |
+| **all** | **29** | **200** | **0.145** |
 
 Three things this says that the single number did not.
 
-**Yield is a function of size, not a constant.** It falls by roughly a factor
-of eight between one gate and six, and it is still falling at six. A corpus
+**Yield is a function of size, not a constant.** It falls by more than a factor
+of ten between one gate and six, and it is still falling at six. A corpus
 built this way is therefore biased small, and any model trained on it inherits
 that bias — which matters for the extrapolation split specifically, since
 "harder than anything in training" is exactly what it is meant to test.
@@ -331,18 +336,21 @@ wherever it is needed and the netlist stage refuses nothing.
 
 The capability gain is real: a spec that wants a signal in four places is
 buildable at all now, and the verifier confirms the truth tables. The yield
-gain is zero. Rerunning the same 200 specs: **27 solved, exactly as before**.
-All 24 netlist rejections became routing failures instead, because the specs
-that want a fourth face are the dense ones, and two more gates puts them in
-the part of the size curve where yield is 0.06.
+gain is zero. Measured before and after on a matched run of the same 200
+specs — 27 solved either way, with all 24 netlist rejections turning into
+routing failures — because the specs that want a fourth face are the dense
+ones, and two more gates puts them in the part of the size curve where yield
+is 0.03. (Those two runs used a fixed per-spec seed rather than the offset the
+command above uses, which is why 27 there and 29 here; the comparison is
+between the two trees, not with the table.)
 
 That is worth stating plainly rather than filing as a win. Removing a hard
 limit and moving the same specs into a different failure bucket are both
 true, and only the first is progress.
 
-**The routing failures are two shapes, both connectivity.** `cannot reach
-inverter` and `cannot join fragments` are 131 of the 152 routing failures
-between them, and 151 of 173 after buffering. Neither is about running out of *space* — the board is nowhere
+**The routing failures are two shapes, both connectivity.** `cannot join
+fragments` and `cannot reach inverter` are 159 of the 169 routing failures
+between them. Neither is about running out of *space* — the board is nowhere
 near full when they fire — they are about a net's pieces ending up in regions
 the router cannot connect after earlier nets have been committed. That points
 at ordering and at the greedy commit, not at the grid being too small.
@@ -363,6 +371,8 @@ Over the same 200 specs it changes nothing at all:
 | cannot reach inverter | 76 | 76 |
 | cannot join fragments | 75 | 75 |
 | no head-on input face | 17 | 17 |
+
+(measured with the fixed per-spec seed, as above)
 
 Not "roughly the same" — the same failure on the same spec, every time. When
 the largest fragment cannot reach anything, no pair can, because fragments are

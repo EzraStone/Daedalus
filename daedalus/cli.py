@@ -416,6 +416,19 @@ class _TimedVerifier:
         return timed
 
 
+def _failure_shape(stage: str, detail: str) -> str:
+    """A failure detail with the indices removed, so like groups with like.
+
+    "net 3: cannot reach inverter 1" and "net 5: cannot reach inverter 2" are
+    the same problem, and counting them apart hides the only thing the
+    breakdown is for. Numbers become N and quoted lists become [..].
+    """
+    import re
+
+    text = re.sub(r"\['[^']*'\]", "[..]", detail or stage)
+    return f"{stage}: {re.sub(r'[0-9]+', 'N', text)}"
+
+
 def cmd_bench_compiler(args) -> int:
     """Measure end-to-end compiler throughput, and where the time goes.
 
@@ -434,6 +447,9 @@ def cmd_bench_compiler(args) -> int:
     per_spec: list[float] = []
     solved = 0
     stages: dict[str, int] = {}
+    shapes: dict[str, int] = {}
+    tried_at: dict[int, int] = {}
+    solved_at: dict[int, int] = {}
     with Verifier() as inner:
         timed = _TimedVerifier(inner)
         # Warm the worker so its first-call cost is not charged to the first
@@ -448,7 +464,12 @@ def cmd_bench_compiler(args) -> int:
             attempt = compile_spec(spec, timed, random.Random(args.seed + i), attempts=args.attempts)
             per_spec.append(time.perf_counter() - started)
             solved += attempt.ok
+            tried_at[spec.gates] = tried_at.get(spec.gates, 0) + 1
+            solved_at[spec.gates] = solved_at.get(spec.gates, 0) + attempt.ok
             stages[attempt.stage] = stages.get(attempt.stage, 0) + 1
+            if not attempt.ok:
+                shape = _failure_shape(attempt.stage, attempt.detail)
+                shapes[shape] = shapes.get(shape, 0) + 1
         wall = time.perf_counter() - wall_started
 
     millis = sorted(x * 1e3 for x in per_spec)
@@ -465,6 +486,21 @@ def cmd_bench_compiler(args) -> int:
     )
     print(f"  the other {1 - share:.1%} is netlist, placement and routing, in Python.")
     print("\nstages: " + ", ".join(f"{k} {n}" for k, n in sorted(stages.items())))
+    # Yield is not a constant. It falls with gate count, which is why a corpus
+    # built this way is biased small -- and that bias lands hardest on the
+    # extrapolation split, whose whole job is to be harder than training.
+    print("\nyield by gate count:")
+    for gates in sorted(tried_at):
+        tried = tried_at[gates]
+        print(f"  {gates:2d} gates: {solved_at[gates]:4d}/{tried:<4d} {solved_at[gates] / tried:.2f}")
+
+    if shapes:
+        # The stage alone says "routing" for two failures that need different
+        # fixes. The shape is what the placer actually said, with the indices
+        # taken out so the same complaint about different nets groups together.
+        print("\nfailure shapes:")
+        for shape, n in sorted(shapes.items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"  {n:5d}  {shape}")
     print(
         "\nA spec that never routes never reaches the verifier, so the share above\n"
         "is low partly because most specs fail before it is asked anything."
