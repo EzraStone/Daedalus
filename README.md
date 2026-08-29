@@ -371,7 +371,16 @@ docs/                     design spec, divergences, hardware notes
    `layouts_per_spec` on the same axes — the second is the collapse alarm and
    the whole approach fails quietly without it. `daedalus loop` already prints
    the warning; nothing has yet given it anything to warn about.
-4. **Broaden bridge coverage.** Measure crossbar success by topology, then add
+4. **Attack the routing yield, and only the routing yield.** The discard rate
+   has been broken down (see [`docs/benchmarks.md`](docs/benchmarks.md)) and it
+   is not one problem. Two failure shapes — a net that cannot reach its
+   inverter, and a net that cannot be joined into one region — are 151 of 173
+   failures, and neither fires because the board is full. They are about pieces
+   landing where the router cannot connect them once earlier nets are
+   committed, which points at ordering and the greedy commit rather than at the
+   volume. The fan-out gap was the other candidate; it is closed, and closing
+   it moved the yield number not at all.
+5. **Broaden bridge coverage.** Measure crossbar success by topology, then add
    compact vertical primitives for placements the conservative span rejects.
    The seven-cell span is expensive: see the yield figures in
    [`docs/benchmarks.md`](docs/benchmarks.md) for what XOR coverage costs.
