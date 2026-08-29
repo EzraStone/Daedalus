@@ -257,10 +257,14 @@ def parse_ascii_layer(text: str) -> list[int]:
     """Turn 16 lines of 16 characters into a grid.
 
     Only the logic layer; the substrate is added underneath. Deliberately
-    strict — a lenient parser would silently repair the baseline's output and
-    make the comparison meaningless.
+    strict about *blocks* — a lenient parser would silently repair the
+    baseline's output and make the comparison meaningless — and deliberately
+    forgiving about *packaging*. Prose before and after the grid, a fenced code
+    block, and indentation are all dropped, because none of them changes a
+    block. Counting an indented grid as unparseable would understate the
+    baseline for a reason that has nothing to do with redstone.
     """
-    lines = [ln.rstrip() for ln in text.strip().splitlines() if ln.strip()]
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
     lines = [ln for ln in lines if all(c in _ASCII for c in ln)]
     if len(lines) != V.SZ or any(len(ln) != V.SX for ln in lines):
         raise ValueError(f"expected {V.SZ} lines of {V.SX} characters, got {len(lines)}")

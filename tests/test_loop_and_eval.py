@@ -67,6 +67,12 @@ def worked(verifier):
     return out
 
 
+#: An all-air logic layer. Well-formed as far as the parser is concerned and
+#: hopeless as a circuit, which is exactly what a parser test wants: any
+#: failure is then the parser's and not the layout's.
+BLANK = "\n".join("." * V.SX for _ in range(V.SZ))
+
+
 class TestLoopAcceptance:
     def test_keeps_only_verified_samples(self, verifier, worked):
         # The stub emits one good layout and a pile of noise. Only the good one
@@ -307,6 +313,40 @@ class TestBaselines:
             parse_ascii_layer("too short")
         with pytest.raises(ValueError):
             parse_ascii_layer("\n".join("." * 15 for _ in range(16)))
+
+    def test_a_grid_wrapped_in_prose_still_parses(self):
+        # No frontier model reliably obeys "and nothing else". Refusing the
+        # ones that say hello first would measure instruction-following, which
+        # is not the thing under test.
+        text = "Sure! Here is the layout:\n\n" + BLANK + "\n\nLet me know if you want changes."
+        assert len(parse_ascii_layer(text)) == V.CELLS
+
+    def test_a_fenced_code_block_still_parses(self):
+        assert len(parse_ascii_layer("```\n" + BLANK + "\n```")) == V.CELLS
+
+    def test_an_indented_grid_still_parses(self):
+        # Markdown puts code blocks four spaces in. Indentation moves no
+        # blocks, so counting this as unparseable would charge the baseline for
+        # a formatting convention rather than for a circuit.
+        indented = "\n".join("    " + line for line in BLANK.splitlines())
+        assert len(parse_ascii_layer(indented)) == V.CELLS
+
+    def test_one_unknown_character_rejects_the_whole_reply(self):
+        # The alternative is guessing what 'x' meant, which puts a block the
+        # model did not ask for into a grid the verifier then grades.
+        with pytest.raises(ValueError):
+            parse_ascii_layer(BLANK.replace(".", "x", 1))
+
+    def test_two_grids_in_one_reply_are_refused(self):
+        # Picking one would be picking the model's answer for it.
+        with pytest.raises(ValueError):
+            parse_ascii_layer(BLANK + "\n\n" + BLANK)
+
+    def test_prose_made_only_of_grid_characters_is_not_silently_absorbed(self):
+        # "..." is three legal characters and no circuit. It survives the
+        # alphabet filter, so the line count is what has to catch it.
+        with pytest.raises(ValueError):
+            parse_ascii_layer("...\n" + BLANK)
 
     def test_ascii_round_trip_preserves_the_logic_layer(self):
         grid = Grid.with_substrate()
