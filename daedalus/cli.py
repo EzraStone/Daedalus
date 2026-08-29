@@ -236,6 +236,29 @@ def cmd_baselines(args) -> int:
     return 0
 
 
+def _newer_sources(binary: Path) -> Path | None:
+    """A Rust source file modified after the binary was built, if any.
+
+    The protocol between the two halves is versioned, so a binary built
+    before a bump is refused at the first request -- with a message that says
+    to rebuild, three commands after the point where it could have been said.
+    A timestamp comparison catches it here instead, and catches the quieter
+    case too: a change to the simulator that has not been compiled means every
+    verdict is coming from the old rules.
+
+    Returns ``None`` when the sources are absent, which is the normal state of
+    an installed package rather than a checkout.
+    """
+    src = Path(__file__).resolve().parent.parent / "crates" / "redsim" / "src"
+    if not src.is_dir() or not binary.exists():
+        return None
+    built = binary.stat().st_mtime
+    for path in sorted(src.rglob("*.rs")):
+        if path.stat().st_mtime > built:
+            return path.relative_to(src.parent.parent.parent)
+    return None
+
+
 def cmd_doctor(args) -> int:
     """Check everything a fresh clone needs, and say what is missing.
 
@@ -263,7 +286,15 @@ def cmd_doctor(args) -> int:
         from .redsim import find_binary
 
         binary = find_binary()
-        report("verifier", True, str(binary), required=True)
+        stale = _newer_sources(binary)
+        report(
+            "verifier",
+            not stale,
+            str(binary)
+            if not stale
+            else f"{binary} is older than {stale} — cargo build --release -p redsim",
+            required=True,
+        )
     except VerifierError as e:
         report("verifier", False, f"{e}", required=True)
         binary = None

@@ -272,6 +272,58 @@ class TestPromptedSampling:
         assert model.prompts is not None
 
 
+class TestStaleBinaryCheck:
+    """The failure a protocol bump creates, caught before anything runs."""
+
+    def _fake_tree(self, tmp_path, binary_first: bool):
+        import os
+
+        src = tmp_path / "crates" / "redsim" / "src"
+        src.mkdir(parents=True)
+        binary = tmp_path / "target" / "release" / "redsim"
+        binary.parent.mkdir(parents=True)
+        source = src / "tick.rs"
+        if binary_first:
+            binary.write_text("")
+            source.write_text("")
+            os.utime(source, (2_000_000_000, 2_000_000_000))
+        else:
+            source.write_text("")
+            binary.write_text("")
+            os.utime(binary, (2_000_000_000, 2_000_000_000))
+        return binary, source
+
+    def _check(self, monkeypatch, tmp_path, binary):
+        import daedalus.cli as cli
+
+        # _newer_sources walks up from the module's own file to find the
+        # checkout, so point it at the fake one.
+        monkeypatch.setattr(cli, "__file__", str(tmp_path / "daedalus" / "cli.py"))
+        return cli._newer_sources(binary)
+
+    def test_a_source_newer_than_the_binary_is_named(self, tmp_path, monkeypatch):
+        binary, source = self._fake_tree(tmp_path, binary_first=True)
+        found = self._check(monkeypatch, tmp_path, binary)
+        assert found is not None and found.name == source.name
+
+    def test_a_fresh_binary_is_not_flagged(self, tmp_path, monkeypatch):
+        binary, _ = self._fake_tree(tmp_path, binary_first=False)
+        assert self._check(monkeypatch, tmp_path, binary) is None
+
+    def test_an_installed_package_with_no_sources_is_not_flagged(self, tmp_path, monkeypatch):
+        # Most installs have no crates/ directory. Reporting every one of them
+        # as stale would make the check noise and train people to ignore it.
+        binary = tmp_path / "redsim"
+        binary.write_text("")
+        assert self._check(monkeypatch, tmp_path, binary) is None
+
+    def test_doctor_still_passes_on_this_checkout(self, capsys):
+        # Guards the guard: a check that fires on a correctly built tree is
+        # worse than no check.
+        assert main(["doctor"]) == 0
+        assert "MISS  verifier" not in capsys.readouterr().out
+
+
 class TestBench:
     def test_compiler_mode_reports_where_the_time_goes(self, capsys):
         # The point of the mode. A verdict costs microseconds and a layout
