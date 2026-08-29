@@ -69,10 +69,17 @@ Two things follow, and both matter when reading it:
   read against the layout it came from. Both UIs draw it over the grid for
   exactly that reason.
 
-`settled` is the honest part of the answer. A circuit the Gray-code pass already
-rejected as history-dependent has no single resting state to photograph, and the
-field comes back with `settled` false rather than with whichever state the
-simulator happened to stop in.
+`settled` says whether there was a resting state to photograph at all. It is
+false when the circuit oscillates, or when it had not come to rest inside the
+tick budget — and in both cases the field is a snapshot of something still
+moving, which is worth knowing before reading anything into it.
+
+It does **not** cover history dependence. `power` resets the circuit and applies
+the assignment directly, so a history-dependent circuit settles, `settled` comes
+back true, and the field shows the state reached from all-levers-off — one of
+its resting states, not necessarily the one a player flipping levers in some
+other order would be looking at. `evaluate` is what detects that case, and it
+rejects the circuit; `power` is a viewer and takes the grid as given.
 
 ## How this list is checked
 
