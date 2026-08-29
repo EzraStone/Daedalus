@@ -356,6 +356,63 @@ class TestBaselines:
         assert back.get(4, V.LOGIC_Y, 4) == V.WIRE
         assert back.get(5, V.LOGIC_Y, 4) == V.SOLID
 
+    def test_torch_attachment_survives_the_round_trip(self):
+        # It did not, and that is the bug this alphabet exists to fix: every
+        # torch was drawn 't', so a circuit whose torch hung off the block to
+        # its south came back hanging off nothing.
+        grid = Grid.with_substrate()
+        for attach, z in zip(
+            (V.Attach.NORTH, V.Attach.SOUTH, V.Attach.WEST, V.Attach.EAST), range(4)
+        ):
+            grid.set(6, V.LOGIC_Y, z, V.torch(attach))
+        back = parse_ascii_layer(render_ascii_layer(grid))
+        assert back == grid.tokens()
+
+    def test_repeater_facing_survives_the_round_trip(self):
+        grid = Grid.with_substrate()
+        for facing, z in zip(
+            (V.Dir4.NORTH, V.Dir4.SOUTH, V.Dir4.WEST, V.Dir4.EAST), range(4)
+        ):
+            grid.set(6, V.LOGIC_Y, z, V.repeater(facing, 1))
+        back = parse_ascii_layer(render_ascii_layer(grid))
+        assert back == grid.tokens()
+
+    def test_a_real_compiled_circuit_round_trips_to_itself(self, worked):
+        # The end the whole alphabet is for. Before this the render of a
+        # working circuit parsed back to a malformed one, so any few-shot
+        # prompt built from real output taught the model an ungradeable grid.
+        _spec, _placed, tokens = worked[0]
+        grid = Grid.from_tokens(tokens)
+        if any(y > V.LOGIC_Y for y in grid.occupied_layers()):
+            pytest.skip("bridged circuit; a single layer of characters cannot say so")
+        assert parse_ascii_layer(render_ascii_layer(grid)) == tokens
+
+    def test_a_bridged_circuit_is_refused_rather_than_flattened(self):
+        # Dropping the upper layers would hand back a different circuit that
+        # happens to parse, which is the same failure as flattening a torch.
+        grid = Grid.with_substrate()
+        grid.set(4, V.LOGIC_Y + 2, 4, V.SOLID)
+        with pytest.raises(ValueError, match="above the logic layer"):
+            render_ascii_layer(grid)
+
+    def test_a_block_outside_the_alphabet_is_named_not_approximated(self):
+        grid = Grid.with_substrate()
+        grid.set(4, V.LOGIC_Y, 4, V.repeater(V.Dir4.EAST, 3))
+        with pytest.raises(ValueError, match="delay=3"):
+            render_ascii_layer(grid)
+
+    def test_the_prompt_describes_every_character_the_parser_accepts(self):
+        # A character the grader accepts but the prompt never mentions is a
+        # point the baseline cannot score; one the prompt names but the parser
+        # rejects turns an obedient reply into an unparseable one.
+        from daedalus.eval.baselines import _ASCII
+
+        spec = Spec.parse("inputs A B\noutputs Q\nQ = A & B")
+        prompt = PromptedLLM(call=lambda p: "").prompt(spec, spec.default_placement())
+        alphabet = prompt.split("Specification:")[0]
+        for ch in _ASCII:
+            assert f"'{ch}'" in alphabet, ch
+
 
 class TestRepairData:
     def test_corruption_never_touches_a_port(self, worked):

@@ -219,8 +219,12 @@ class PromptedLLM:
         return (
             "Build a Minecraft redstone circuit on a 16x16 grid, one layer.\n"
             "Use these characters: '.' air, '#' solid block, 'd' redstone dust,\n"
-            "'t' wall torch (attached to the block on its west side),\n"
-            "'>' repeater facing east, 'V' lever, 'L' lamp.\n"
+            "'L' lamp, 'V' lever, 'T' target block.\n"
+            "Wall torches are named for the side the supporting block is on:\n"
+            "'t' west, 'e' east, 'n' north, 's' south; 'i' is a torch on the floor.\n"
+            "Repeaters point the way the signal leaves: '>' east, '<' west,\n"
+            "'^' north, 'v' south. 'c' is a comparator facing east.\n"
+            "North is up (-z), south is down (+z), west is left (-x), east is right (+x).\n"
             f"Inputs are levers at x=0 on rows {list(placed.input_z)}, each with a\n"
             f"solid block at x=1. Outputs are lamps at x=15 on rows {list(placed.output_z)}.\n\n"
             f"Specification:\n{spec.source(ascii_only=True)}\n\n"
@@ -240,17 +244,44 @@ class PromptedLLM:
         return out
 
 
+#: One character per *block state*, not per block kind.
+#:
+#: The distinction is the whole point. A torch attached to the block on its
+#: west side and one attached on its south side are different circuits, and a
+#: single ``t`` for both means a rendered layout cannot be read back as the
+#: layout it came from. The alphabet therefore spells out orientation wherever
+#: the compiler actually produces more than one — torch attachment and repeater
+#: facing — and stops there. What is left out is left out honestly:
+#: :func:`render_ascii_layer` refuses to draw it rather than flattening it.
+#:
+#: ``t``, ``>``, ``c`` and ``V`` keep the meanings they had, so a prompt or a
+#: transcript written against the old alphabet still parses.
 _ASCII = {
     ".": V.AIR,
     "#": V.SOLID,
     "d": V.WIRE,
-    "t": V.torch(V.Attach.WEST),
-    ">": V.repeater(V.Dir4.EAST, 1),
-    "V": V.lever(V.Dir4.EAST),
     "L": V.LAMP,
     "T": V.TARGET,
+    "V": V.lever(V.Dir4.EAST),
     "c": V.comparator(V.Dir4.EAST),
+    # Wall torches, named for the side the supporting block is on.
+    "t": V.torch(V.Attach.WEST),
+    "n": V.torch(V.Attach.NORTH),
+    "s": V.torch(V.Attach.SOUTH),
+    "e": V.torch(V.Attach.EAST),
+    "i": V.torch(V.Attach.FLOOR),
+    # Repeaters, arrow pointing the way the signal leaves. Delay is always one
+    # tick: the placer has never emitted anything else, and four more
+    # characters per direction would buy nothing but a harder prompt.
+    ">": V.repeater(V.Dir4.EAST, 1),
+    "<": V.repeater(V.Dir4.WEST, 1),
+    "^": V.repeater(V.Dir4.NORTH, 1),
+    "v": V.repeater(V.Dir4.SOUTH, 1),
 }
+
+#: The inverse. Well defined because no two characters name the same state.
+_GLYPH = {token: ch for ch, token in _ASCII.items()}
+assert len(_GLYPH) == len(_ASCII), "two characters claim the same block state"
 
 
 def parse_ascii_layer(text: str) -> list[int]:
@@ -276,8 +307,42 @@ def parse_ascii_layer(text: str) -> list[int]:
 
 
 def render_ascii_layer(grid: Grid) -> str:
-    """The inverse, for building few-shot prompts from real circuits."""
-    return grid.layer_text(V.LOGIC_Y)
+    """Draw the logic layer in the parser's alphabet, exactly or not at all.
+
+    For building few-shot prompts out of circuits that are known to work. It
+    raises rather than approximating, because an approximation here is not a
+    cosmetic loss: the earlier version drew every torch as ``t`` regardless of
+    which side held it up, so reading a real compiled circuit back through
+    :func:`parse_ascii_layer` produced a grid the verifier rejected as
+    malformed. A few-shot prompt built from that is teaching the model to emit
+    something that cannot be graded.
+
+    ``ValueError`` therefore means "this circuit is outside the alphabet", not
+    "this circuit is broken" — pick a different example, or widen the alphabet
+    and say so in the prompt. A bridged circuit is the common case: about a
+    quarter of what the compiler emits routes over itself at y=2 and y=3, and
+    one layer of characters cannot say so.
+    """
+    bridged = [y for y in grid.occupied_layers() if y > V.LOGIC_Y]
+    if bridged:
+        raise ValueError(
+            f"circuit occupies layers {bridged} above the logic layer, "
+            "which a single layer of characters cannot express"
+        )
+    rows = []
+    for z in range(V.SZ):
+        row = []
+        for x in range(V.SX):
+            token = grid.get(x, V.LOGIC_Y, z)
+            try:
+                row.append(_GLYPH[token])
+            except KeyError:
+                raise ValueError(
+                    f"({x}, {V.LOGIC_Y}, {z}) holds {V.state_string(token)}, "
+                    "which the ASCII alphabet cannot express"
+                ) from None
+        rows.append("".join(row))
+    return "\n".join(rows)
 
 
 @dataclass
