@@ -17,7 +17,11 @@ That single change buys three things:
   preference model. Every sample gets an exact pass/fail plus continuous scores
   for latency and footprint, in about 41 microseconds when batched the way the
   loop batches — see [`docs/benchmarks.md`](docs/benchmarks.md), and run
-  `daedalus bench` to reproduce it.
+  `daedalus bench` to reproduce it. That figure is the cost of a *verdict*, not
+  of a circuit: building one takes about 250 ms, of which the verifier is 0.1%.
+  `daedalus bench --compiler` reports the split, and the distinction matters
+  because cheap verification is what makes the training loop possible and has
+  nothing to do with how fast a corpus builds.
 - **Unlimited perfectly-labelled training data.** Compose known-good primitives
   into random graphs and derive the label from the graph. No scraped
   schematics, no licensing ambiguity, no noisy captions.
@@ -64,7 +68,7 @@ no README.
 |---|---|
 | `crates/redsim` — the verifier | Complete. 104-case golden suite, 35 tests, 41 µs per evaluation batched (188 µs one at a time — the difference is pipe round-trip, not simulation). |
 | `daedalus.spec` — the DSL | Complete. Full grammar, canonicalisation, semantic hashing byte-identical to the Rust side. |
-| `daedalus.synth` — the procedural compiler | Working. Planar routing plus verified two-level bridges for crossbar netlists. |
+| `daedalus.synth` — the procedural compiler | Working. Planar routing plus verified two-level bridges for crossbar netlists. About 4.8 specs/second; the yield gap, not the speed, is the open problem. |
 | `daedalus.data` — the corpus engine | Working end to end. Builds, verifies, splits, writes a dataset card. |
 | `daedalus.schematic` — export | Complete. `.schem` and `.litematic`, dependency-free NBT. |
 | `daedalus.eval` — metrics and baselines | Complete. Three of four baselines runnable today. |
@@ -100,6 +104,7 @@ python -m daedalus verify specs/nand.txt nand.json
 python -m daedalus corpus data/ --scale 0.1
 python -m daedalus baselines --specs 25
 python -m daedalus bench                # verifier throughput
+python -m daedalus bench --compiler     # end-to-end compiler throughput
 python -m daedalus power specs/nand.txt nand.json   # where the signal goes
 ```
 

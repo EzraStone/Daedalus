@@ -1,5 +1,6 @@
 # Everything depends on the verifier, so it builds first.
 .PHONY: all verifier test test-rust test-python lint selftest web tui corpus baselines \
+	bench-compiler \
         bench train sample loop repair agreement clean
 
 all: verifier
@@ -46,6 +47,12 @@ baselines: verifier
 # rather than asserted -- see docs/benchmarks.md.
 bench: verifier
 	python3 -m daedalus bench --batch 64
+
+# The other half of the picture. A verdict is microseconds and a layout is
+# a quarter of a second, so the target above says nothing about how long
+# building a corpus takes.
+bench-compiler: verifier
+	python3 -m daedalus bench --compiler --specs 50
 
 # Needs the training extra: pip install -e ".[train]"
 train: verifier
