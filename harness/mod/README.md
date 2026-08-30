@@ -4,19 +4,19 @@ A Fabric server mod that accepts a `.schem` over a socket, places it in a void
 world, walks the input levers through every combination, and reports the output
 lamp states.
 
-**This is the untested half of the harness.** It was written against the Fabric
-API but has never been compiled or run — the environment it was authored in has
-no Minecraft server, no Gradle and no Fabric loader. It is committed as source,
-with the protocol pinned, so `harness/compare.py` has something concrete to talk
-to and so the remaining work is visible rather than implied. Treat the Java here
-as a specification of the protocol, not as a working artifact.
+The module targets Minecraft 1.20.1, Yarn build 10, Fabric Loader 0.19.3, and
+Fabric API 0.92.11. Those versions are pinned in `gradle.properties` so local
+and CI builds resolve the same game API.
 
 ## Building
 
 ```bash
 cd harness/mod
-./gradlew build          # needs JDK 17+ and network access to the Fabric maven
+./gradlew build
 ```
+
+The current Loom toolchain runs Gradle on JDK 21 or newer. The compiled mod
+still targets Java 17, which is the runtime required by Minecraft 1.20.1.
 
 Drop the jar in a server's `mods/` alongside Fabric API, run the server with a
 void world, then:

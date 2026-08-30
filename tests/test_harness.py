@@ -21,10 +21,18 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "harness"))
 
-from compare import Case, Report, classify  # noqa: E402
+from compare import (  # noqa: E402
+    Case,
+    Report,
+    build_bridge_case,
+    build_golden_cases,
+    classify,
+    simulate,
+)
 
 from daedalus import vocab as V  # noqa: E402
 from daedalus.grid import Grid  # noqa: E402
+from daedalus.redsim import Verifier  # noqa: E402
 from daedalus.spec import Spec  # noqa: E402
 
 NAND = "inputs A B\noutputs Q\nQ = !(A & B)"
@@ -123,10 +131,11 @@ class TestReport:
 
 class TestCaseBuilding:
     def test_it_builds_what_was_asked_for(self):
-        # Only a few percent of sampled specs survive routing, so a fixed 3x
-        # oversample silently returned a fraction of the requested cases -- and
-        # an agreement rate over a tenth of the intended sample is a different
-        # claim from one over all of it.
+        # Only a few percent of sampled specs survive routing, so a small
+        # fixed oversample used to return a fraction of what was asked for --
+        # and an agreement rate over a tenth of the intended sample is a
+        # different claim from one over all of it. Falling short now raises
+        # rather than being reported, so this asserts the count exactly.
         from compare import build_cases
 
         from daedalus.redsim import Verifier
@@ -136,7 +145,32 @@ class TestCaseBuilding:
         assert len(cases) == 6
         assert len({c.name for c in cases}) == 6
 
-    def test_a_shortfall_is_visible_in_the_report(self):
-        report = Report(cases=3, requested=10, unreachable=3)
-        assert report.as_dict()["requested"] == 10
-        assert report.as_dict()["cases"] == 3
+def test_bridge_fidelity_case_is_elevated_and_passes_redsim():
+    case = build_bridge_case()
+    grid = Grid.from_tokens(case.tokens)
+
+    assert any(
+        grid.get(x, y, z) == V.WIRE
+        for y in range(2, V.SY)
+        for z in range(V.SZ)
+        for x in range(V.SX)
+    )
+
+    with Verifier() as verifier:
+        simulate(case, verifier)
+    assert case.settled
+    assert case.simulated == [0, 1, 2, 3]
+
+
+def test_golden_fidelity_cases_have_unique_names_and_expected_tables():
+    cases = build_golden_cases()
+
+    assert len({case.name for case in cases}) == len(cases)
+    with Verifier() as verifier:
+        for case in cases:
+            simulate(case, verifier)
+
+    assert {case.name: case.simulated for case in cases} == {
+        "golden-direct-repeater": [0, 1],
+        "golden-bridge-independent": [0, 1, 2, 3],
+    }
