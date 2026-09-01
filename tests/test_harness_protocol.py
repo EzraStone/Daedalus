@@ -284,3 +284,52 @@ class TestSettlingIsTwoObservations:
         )
         assert report.cases == 1
         assert report.examples[0]["settled"]["redsim"] is True
+
+
+class TestSelfCheck:
+    """The offline end-to-end path, and the bug it found on its first run."""
+
+    def test_a_hierarchical_case_name_becomes_one_filename(self):
+        # Golden names are paths: "invariance/buffer/row08". Writing that under
+        # a temporary directory made every slash a directory that did not
+        # exist, so every golden case failed against a real server with a
+        # FileNotFoundError that read like a Minecraft problem.
+        from compare import _schematic_filename
+
+        assert "/" not in _schematic_filename("invariance/buffer/row08")
+        assert "\\" not in _schematic_filename("a\\b")
+        assert _schematic_filename("golden-direct-repeater") == "golden-direct-repeater.schem"
+
+    def test_distinct_names_stay_distinct(self):
+        from compare import _schematic_filename
+
+        from daedalus.spec import Spec as _Spec
+
+        del _Spec
+        names = ["and2/2_8_5", "and2/3_9_6", "buffer/row08/d1", "buffer/row08/d2"]
+        assert len({_schematic_filename(n) for n in names}) == len(names)
+
+    def test_the_echo_client_agrees_with_the_simulator_by_construction(
+        self, case, verifier_module
+    ):
+        from compare import EchoClient, run
+
+        report = run([case], verifier_module, EchoClient())
+        assert report.cases == 1
+        assert report.agreed == 1
+        assert report.unreachable == 0
+
+    def test_it_still_serialises_the_schematic(self, case, verifier_module, monkeypatch):
+        # The point of echoing rather than short-circuiting the client: the
+        # self-check has to exercise the same serialisation the real path uses,
+        # or it stops being able to find the bug it just found.
+        import compare
+
+        calls = []
+        real = compare.write_schem
+        monkeypatch.setattr(
+            compare, "write_schem", lambda grid, path: (calls.append(path), real(grid, path))[1]
+        )
+        compare.run([case], verifier_module, compare.EchoClient())
+        assert len(calls) == 1
+        assert str(calls[0]).endswith(".schem")
