@@ -6,6 +6,7 @@
 # is 100% agreement by arithmetic and evidence of nothing at all.
 
 set -euo pipefail
+# shellcheck source=harness/server/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 cases=10

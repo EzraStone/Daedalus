@@ -16,6 +16,7 @@
 # and the one setup.sh prefers.
 
 set -euo pipefail
+# shellcheck source=harness/server/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 API="${ADOPTIUM_API:-https://api.adoptium.net}"

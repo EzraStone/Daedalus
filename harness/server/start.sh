@@ -6,6 +6,7 @@
 # looks like a corrupt jar, so it is checked before anything launches.
 
 set -euo pipefail
+# shellcheck source=harness/server/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 maximum_heap="2G"

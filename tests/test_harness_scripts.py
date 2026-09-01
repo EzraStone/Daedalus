@@ -22,6 +22,14 @@ import pytest
 SERVER = Path(__file__).resolve().parents[1] / "harness" / "server"
 POSIX = ("common.sh", "setup.sh", "start.sh", "smoke.sh", "server-properties.sh")
 
+# These drive bash. The Windows leg of CI has Git Bash and will usually run
+# them, but a Windows checkout without it is not a broken install -- the
+# PowerShell half is what that machine is meant to use. Skipping is the honest
+# outcome; erroring would make a working setup look broken.
+pytestmark = pytest.mark.skipif(
+    shutil.which("bash") is None, reason="no bash; the PowerShell half covers this platform"
+)
+
 
 def properties_from_powershell() -> dict[str, str]:
     """The server.properties block embedded in setup.ps1."""
