@@ -50,6 +50,55 @@ jobs:
       - name: Lint the Python package
         run: python -m ruff check .
 
+  harness:
+    # The fidelity harness cannot be run without a Minecraft server, but
+    # everything up to the socket can: cases build, schematics serialise,
+    # request and response shapes line up, the report adds up. That is where
+    # the bugs have actually been -- the golden cases were writing schematics
+    # to paths with slashes in them, which would have failed every one of the
+    # ninety-four against a real server.
+    name: harness (no game)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Select stable Rust
+        run: rustup default stable
+
+      - name: Install the package
+        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+
+      - name: Build the release verifier
+        run: cargo build --release -p redsim
+
+      - name: Lint the POSIX bootstrap scripts
+        run: shellcheck -x harness/server/*.sh
+
+      - name: Export the golden circuits
+        run: make golden-cases
+
+      - name: Run the whole harness against a stand-in for the game
+        run: python harness/compare.py --suite golden --self-check --out report.json
+
+      - name: Fail if the golden suite shrank to the hand-built pair
+        run: |
+          python - <<'CHECK'
+          import json
+          report = json.load(open("report.json"))
+          if report["cases"] < 90:
+              raise SystemExit(f"golden suite is {report['cases']} cases; the export did not land")
+          if report["checked"] != report["cases"] or report["agreed"] != report["cases"]:
+              raise SystemExit(f"self-check did not agree with itself: {report}")
+          print(f"{report['agreed']}/{report['cases']} through the pipeline")
+          CHECK
+
   generators:
     # The model tests skip themselves without torch, so the matrix above runs
     # green while roughly forty of them never execute -- which is exactly how
