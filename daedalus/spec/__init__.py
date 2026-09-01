@@ -40,6 +40,16 @@ class PlacementError(ValueError):
     """Ports could not be placed on the fixed faces."""
 
 
+def _name(index: int) -> str:
+    """A, B, ... Z, then AA. Matches how the DSL's examples name inputs."""
+    letters = ""
+    while True:
+        letters = chr(ord("A") + index % 26) + letters
+        index = index // 26 - 1
+        if index < 0:
+            return letters
+
+
 @dataclass(frozen=True, slots=True)
 class Spec:
     """A canonical, position-free specification."""
@@ -70,6 +80,29 @@ class Spec:
     @classmethod
     def parse(cls, source: str) -> Spec:
         return cls.from_parsed(parse(source))
+
+    @classmethod
+    def from_rows(cls, n_inputs: int, n_outputs: int, rows) -> Spec:
+        """A spec recovered from a truth table, with no expression behind it.
+
+        The golden circuits are built as grids in Rust and have no DSL source
+        to parse: the table *is* the specification. Everything the verifier
+        needs -- port counts and expected rows -- comes from it, and ``rules``
+        stays empty because inventing an expression that happens to produce
+        this table would be a different circuit's description.
+
+        ``source()`` therefore renders the ports and the constraints and no
+        rule lines, which is the honest rendering of what is known.
+        """
+        rows = tuple(int(r) for r in rows)
+        if len(rows) != 1 << n_inputs:
+            raise ValueError(f"{len(rows)} rows for {n_inputs} inputs; expected {1 << n_inputs}")
+        return cls(
+            inputs=tuple(_name(i) for i in range(n_inputs)),
+            outputs=tuple(f"Q{j}" for j in range(n_outputs)),
+            rows=rows,
+            constraints=Constraints(),
+        )
 
     # -- identity ----------------------------------------------------------
 
