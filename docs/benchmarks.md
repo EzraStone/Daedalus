@@ -380,6 +380,34 @@ separated by committed cells rather than by distance and the separation is
 effectively transitive. Reverted. Recorded because it is the first thing
 anyone looking at that error message will try.
 
+### Reconsidering earlier gates, which is worse than starting over
+
+The placer commits each gate for good. Sites are tried *within* a gate, so a
+bad site can be undone, but a gate with no workable site fails the whole
+layout even when the real problem is where the gate before it parked. Turning
+that into a depth-first walk that backs into the previous gate is the textbook
+fix, and it is what the failure shapes appear to be asking for.
+
+| | commit and move on | back into the previous gate |
+|---|---|---|
+| solved of 200 | 29 | 24 |
+
+It is not close, and it is not a bug in the search — the first version had one,
+in the path where a gate has no sites at all, and fixing it changed the result
+by nothing. The reason is that the search optimises the wrong thing. Placing
+gate *g* only routes the net that feeds *g*; whether the whole layout works is
+not known until the outputs are routed at the very end, so the search spends
+its budget perfecting a proxy.
+
+Worse, it spends that budget on a board whose *ports* are already fixed. When
+the old code gives up, `compile_attempts` re-rolls the placement, which moves
+the port rows and reshuffles the candidate sites — a much bigger lever than
+rearranging gates between ports that were wrong to begin with. Backtracking
+buys the small lever by giving up the large one.
+
+Two experiments on this failure mode now, both negative, and both pointing the
+same way: these failures are not local. Reverted.
+
 None of this is fixed here. It is written down because "20% yield" was being
 treated as a property of the problem, and it is three separate problems with
 three different fixes.
