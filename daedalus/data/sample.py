@@ -49,6 +49,10 @@ class SampleConfig:
     negation_rate: float = 0.35
     #: How often to attach a hard constraint, which the verifier enforces.
     constraint_rate: float = 0.15
+    #: Upper bound on outputs per spec. The default of one keeps every number
+    #: measured so far comparable; above one the sampler draws several rules
+    #: over the same inputs, which is the only way the corpus contains a
+    #: circuit whose subterm feeds two places.
     max_outputs: int = 1
 
     def with_gates(self, lo: int, hi: int) -> SampleConfig:
@@ -131,13 +135,38 @@ def sample_spec(rng: random.Random, cfg: SampleConfig = SampleConfig()) -> Spec:
         n_unary = gates - n_binary
 
         names = list(NAMES[:n_inputs])
-        leaves = [Ref(name) for name in names]
-        while len(leaves) < n_binary + 1:
-            leaves.append(Ref(rng.choice(names)))
-        expr = _random_tree(rng, leaves, cfg.gate_set)
-        expr = _insert_negations(rng, expr, n_unary)
 
-        parsed = ParsedSpec(inputs=names, outputs=["Q"], rules={"Q": expr})
+        def draw(binary: int, unary: int, names=names):
+            leaves = [Ref(name) for name in names]
+            while len(leaves) < binary + 1:
+                leaves.append(Ref(rng.choice(names)))
+            return _insert_negations(rng, _random_tree(rng, leaves, cfg.gate_set), unary)
+
+        n_outputs = rng.randint(1, max(1, cfg.max_outputs))
+        if n_outputs == 1:
+            rules = {"Q": draw(n_binary, n_unary)}
+        else:
+            # Split the gate budget between the outputs so a two-output spec is
+            # not simply twice the circuit. Each output gets at least one gate.
+            rules = {}
+            remaining_binary, remaining_unary = n_binary, n_unary
+            for j in range(n_outputs):
+                left = n_outputs - j - 1
+                # Clamped: with fewer binary gates than outputs left to fill,
+                # the remaining outputs are single-leaf rules like `Q1 = A`,
+                # which are legal and are how a spec ends up routing an input
+                # straight through beside a computed one.
+                take_b = (
+                    remaining_binary
+                    if left == 0
+                    else rng.randint(0, max(0, remaining_binary - left))
+                )
+                take_u = remaining_unary if left == 0 else rng.randint(0, remaining_unary)
+                remaining_binary -= take_b
+                remaining_unary -= take_u
+                rules[f"Q{j}"] = draw(take_b, take_u)
+
+        parsed = ParsedSpec(inputs=names, outputs=list(rules), rules=rules)
         if irrelevant_inputs(parsed):
             continue
         spec = Spec.from_parsed(parsed)
