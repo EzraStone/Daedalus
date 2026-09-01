@@ -15,8 +15,10 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import random
 import socket
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -350,9 +352,70 @@ def build_direct_case() -> Case:
     return Case("golden-direct-repeater", spec, placed, grid.tokens())
 
 
-def build_golden_cases() -> list[Case]:
-    """Return the deterministic real-game regression suite."""
-    return [build_direct_case(), build_bridge_case()]
+#: The checkout this file lives in, which is where cargo has to be run from.
+REPOSITORY = Path(__file__).resolve().parents[1]
+
+#: Where `cargo test --test golden` is asked to leave its export.
+GOLDEN_EXPORT = REPOSITORY / "target" / "golden-cases.json"
+
+
+def export_golden_cases(path: Path = GOLDEN_EXPORT) -> Path:
+    """Run the Rust golden test in dump mode and return the file it wrote.
+
+    The 104 circuits are constructed in Rust and were reachable only from
+    inside the test binary, which is why three documents promised agreement
+    over the golden set while the harness could reach two hand-built cases.
+    """
+    path = Path(path).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Always the checkout, never somewhere derived from the output path: the
+    # export may legitimately be written to a temporary directory, and cargo
+    # has to be run where Cargo.toml is.
+    subprocess.run(
+        ["cargo", "test", "--test", "golden", "--", "golden_suite"],
+        cwd=REPOSITORY,
+        env={**os.environ, "REDSIM_DUMP_GOLDEN": str(path)},
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+def load_golden_export(path: Path = GOLDEN_EXPORT) -> list[Case]:
+    """Turn the Rust export into cases the harness can replay."""
+    records = json.loads(path.read_text(encoding="utf-8"))
+    cases = []
+    for record in records:
+        # Malformed-by-construction cases are redsim's business, not the
+        # game's: a grid with floating dust cannot be placed in a world, so
+        # replaying it would score a guaranteed disagreement against a suite
+        # whose stated target is 100%.
+        if record.get("malformed"):
+            continue
+        spec = Spec.from_rows(
+            n_inputs=len(record["input_z"]),
+            n_outputs=len(record["output_z"]),
+            rows=[int(r) for r in record["rows"]],
+        )
+        placed = spec.place(tuple(record["input_z"]), tuple(record["output_z"]))
+        tokens = [int(t) for t in record["tokens"]]
+        Grid.from_tokens(tokens)
+        cases.append(Case(str(record["name"]), spec, placed, tokens))
+    return cases
+
+
+def build_golden_cases(export: Path | None = GOLDEN_EXPORT) -> list[Case]:
+    """The deterministic real-game regression suite.
+
+    The two hand-built cases always, plus the 104 from the Rust golden suite
+    when they have been exported. Missing export is not an error -- it needs a
+    Cargo toolchain -- but it is the difference between the claim in the docs
+    and two circuits, so `main` says which of the two it got.
+    """
+    cases = [build_direct_case(), build_bridge_case()]
+    if export is not None and export.exists():
+        cases.extend(load_golden_export(export))
+    return cases
 
 
 def run(
@@ -422,6 +485,11 @@ def main(argv=None) -> int:
         help="select random cases, deterministic golden cases, or both",
     )
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument(
+        "--export-golden",
+        action="store_true",
+        help="run the Rust golden test first to export its cases (needs cargo)",
+    )
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=25599)
     ap.add_argument(
@@ -452,7 +520,21 @@ def main(argv=None) -> int:
     with Verifier() as verifier:
         cases = []
         if args.suite in {"golden", "combined"}:
-            cases.extend(build_golden_cases())
+            if args.export_golden and not GOLDEN_EXPORT.exists():
+                export_golden_cases()
+            golden = build_golden_cases()
+            # Say which golden set this is. Two cases and ninety-six are very
+            # different claims, and the difference is a cargo invocation, not
+            # anything about the circuits.
+            print(f"golden suite: {len(golden)} cases", file=sys.stderr)
+            if len(golden) <= 2:
+                print(
+                    "  (only the hand-built pair; run with --export-golden, or "
+                    "`REDSIM_DUMP_GOLDEN=$PWD/target/golden-cases.json cargo test "
+                    "--test golden`, to add the 94 replayable cases from the Rust suite)",
+                    file=sys.stderr,
+                )
+            cases.extend(golden)
         if args.suite in {"random", "combined"}:
             cases.extend(build_cases(args.cases, args.seed, verifier, args.corpus_cache))
         if args.dry_run:
