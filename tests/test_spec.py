@@ -197,6 +197,98 @@ class TestUnsatisfiableConstraints:
             assert spec.constraints.unsatisfiable(spec) is None, spec.source()
 
 
+class TestMultiOutputSampling:
+    """max_outputs was declared and never read.
+
+    Anyone setting it to three got single-output specs and no complaint, so
+    the entire corpus was one output wide -- a class the DSL, the netlist, the
+    placer and the verifier all support and the training data never contained.
+    """
+
+    def _cfg(self, outputs):
+        from dataclasses import replace
+
+        from daedalus.data.sample import SampleConfig
+
+        return replace(SampleConfig(), max_outputs=outputs)
+
+    def test_the_default_is_still_one_output(self):
+        # Every measured number in docs/benchmarks.md was taken on
+        # single-output specs. The default has to keep them comparable.
+        import random as _random
+
+        from daedalus.data.sample import SampleConfig, sample_spec
+
+        assert SampleConfig().max_outputs == 1
+        rng = _random.Random(0)
+        assert all(sample_spec(rng, SampleConfig()).n_outputs == 1 for _ in range(40))
+
+    def test_raising_it_actually_produces_more_outputs(self):
+        import random as _random
+
+        from daedalus.data.sample import sample_spec
+
+        rng = _random.Random(0)
+        counts = {sample_spec(rng, self._cfg(3)).n_outputs for _ in range(60)}
+        assert counts == {1, 2, 3}
+
+    def test_it_never_exceeds_the_bound(self):
+        import random as _random
+
+        from daedalus.data.sample import sample_spec
+
+        rng = _random.Random(1)
+        assert all(sample_spec(rng, self._cfg(2)).n_outputs <= 2 for _ in range(60))
+
+    def test_every_output_gets_a_distinct_name(self):
+        import random as _random
+
+        from daedalus.data.sample import sample_spec
+
+        rng = _random.Random(2)
+        for _ in range(40):
+            spec = sample_spec(rng, self._cfg(3))
+            assert len(set(spec.outputs)) == spec.n_outputs
+
+    def test_multi_output_specs_are_still_satisfiable(self):
+        import random as _random
+
+        from daedalus.data import sample_unique
+
+        for spec in sample_unique(_random.Random(0), 30, self._cfg(3)):
+            assert spec.constraints.unsatisfiable(spec) is None, spec.source()
+
+    def test_the_gate_budget_is_split_not_multiplied(self):
+        # Giving every output the full budget would make a three-output spec
+        # three times the circuit, which is a different difficulty axis from
+        # the one the splits are stratified on.
+        import random as _random
+
+        from daedalus.data.sample import SampleConfig, sample_spec
+
+        rng = _random.Random(4)
+        for _ in range(40):
+            spec = sample_spec(rng, self._cfg(3))
+            assert spec.gates <= SampleConfig().max_gates, spec.source()
+
+    def test_a_sampled_multi_output_spec_compiles(self):
+        # The class is supported everywhere downstream; this is the check that
+        # the sampler emits something the rest of the pipeline can take.
+        import random as _random
+
+        from daedalus.data import sample_unique
+        from daedalus.redsim import Verifier
+        from daedalus.synth import compile as compile_spec
+
+        specs = [s for s in sample_unique(_random.Random(5), 40, self._cfg(3)) if s.n_outputs > 1]
+        assert specs, "the sampler produced no multi-output spec to try"
+        with Verifier() as verifier:
+            assert any(
+                compile_spec(s, verifier, _random.Random(i), attempts=10).ok
+                for i, s in enumerate(specs[:12])
+            )
+
+
 class TestPromptEncoding:
     """Prompts into features, for the conditioning path that was only a slot."""
 
