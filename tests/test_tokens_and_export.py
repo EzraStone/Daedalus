@@ -270,6 +270,45 @@ class TestSchematicRoundTrip:
         path = write_schem(grid, tmp_path / "c.schem")
         assert read_schem(path).tokens() == grid.tokens()
 
+    def test_every_block_in_the_vocabulary_survives_both_formats(self, tmp_path):
+        # The round trip above covers four block states out of forty-four. A
+        # format that lost, say, a north-facing repeater would corrupt every
+        # exported circuit containing one -- and export is what the fidelity
+        # measurement runs on, so the corruption would surface as the game
+        # disagreeing with the simulator.
+        from daedalus.schematic import read_litematic, read_schem, write_litematic
+
+        tokens = list(V.BLOCK_TOKENS)
+        grid = Grid.with_substrate()
+        placed = 0
+        for z in range(V.SZ):
+            for x in range(V.SX):
+                if placed >= len(tokens):
+                    break
+                grid.set(x, V.LOGIC_Y, z, tokens[placed])
+                placed += 1
+        assert placed == len(tokens), "the grid could not hold the whole vocabulary"
+
+        assert read_schem(write_schem(grid, tmp_path / "all.schem")).tokens() == grid.tokens()
+        written = write_litematic(grid, tmp_path / "all.litematic")
+        assert read_litematic(written).tokens() == grid.tokens()
+
+    def test_a_circuit_that_bridges_over_itself_survives_both_formats(self, tmp_path):
+        # Roughly a quarter of what the compiler emits routes over itself at
+        # y=2 and y=3. A format that only preserved the logic layer would be
+        # exact on every test above and wrong on a quarter of real output.
+        from daedalus.schematic import read_litematic, read_schem, write_litematic
+
+        grid = Grid.with_substrate()
+        for y in range(V.SY):
+            grid.set(3, y, 3, V.SOLID)
+            grid.set(4, y, 3, V.WIRE if y else V.SOLID)
+        assert len(grid.occupied_layers()) > 2
+
+        assert read_schem(write_schem(grid, tmp_path / "b.schem")).tokens() == grid.tokens()
+        written = write_litematic(grid, tmp_path / "b.litematic")
+        assert read_litematic(written).tokens() == grid.tokens()
+
     def test_a_schematic_bigger_than_the_build_volume_is_refused(self, tmp_path):
         from daedalus.schematic import SchematicError, read_schem
         from daedalus.schematic.nbt import ByteArray, Int, Short, dumps
