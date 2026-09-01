@@ -7,7 +7,8 @@
 # agree rather than trusting this comment.
 
 set -euo pipefail
-# shellcheck source=harness/server/common.sh
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 accept_eula=0
