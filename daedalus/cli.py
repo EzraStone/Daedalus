@@ -188,9 +188,15 @@ def _placement_from_grid(spec: Spec, grid):
 
 
 def cmd_corpus(args) -> int:
-    from .data.corpus import build
+    from dataclasses import replace
 
-    report = build(args.out, seed=args.seed, scale=args.scale)
+    from .data.corpus import build
+    from .data.sample import SampleConfig
+
+    cfg = None
+    if args.max_outputs != 1:
+        cfg = replace(SampleConfig(), max_outputs=args.max_outputs)
+    report = build(args.out, seed=args.seed, scale=args.scale, cfg=cfg)
     print(json.dumps(report.as_dict(), indent=2))
     return 0
 
@@ -990,6 +996,13 @@ def main(argv=None) -> int:
     p.add_argument("out")
     p.add_argument("--scale", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--max-outputs",
+        type=int,
+        default=1,
+        help="draw specs with up to this many outputs; above 1 costs roughly "
+        "half the yield per output (see docs/benchmarks.md)",
+    )
     p.set_defaults(func=cmd_corpus)
 
     p = sub.add_parser("baselines", help="run the non-learned baselines")

@@ -324,6 +324,34 @@ class TestStaleBinaryCheck:
         assert "MISS  verifier" not in capsys.readouterr().out
 
 
+class TestCorpusOutputs:
+    def test_the_flag_reaches_the_sampler(self, tmp_path, capsys):
+        # The knob it exposes was decoration until recently, so this checks
+        # the whole path rather than the argument parser: examples with more
+        # than one output have to actually land in the corpus.
+        import json as _json
+
+        assert main(["corpus", str(tmp_path / "c"), "--scale", "0.05",
+                     "--max-outputs", "3", "--seed", "1"]) == 0
+        capsys.readouterr()
+        seen = set()
+        for path in (tmp_path / "c").glob("*.jsonl"):
+            for line in path.read_text().splitlines():
+                if line.strip():
+                    seen.add(_json.loads(line)["n_outputs"])
+        assert seen - {1}, f"no multi-output example reached the corpus: {seen}"
+
+    def test_the_default_corpus_is_still_single_output(self, tmp_path, capsys):
+        import json as _json
+
+        assert main(["corpus", str(tmp_path / "d"), "--scale", "0.02"]) == 0
+        capsys.readouterr()
+        for path in (tmp_path / "d").glob("*.jsonl"):
+            for line in path.read_text().splitlines():
+                if line.strip():
+                    assert _json.loads(line)["n_outputs"] == 1
+
+
 class TestDoctorHarness:
     """doctor said nothing about the thing the first next-step depends on."""
 
