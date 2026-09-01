@@ -1,0 +1,197 @@
+"""The socket protocol, driven end to end against a stand-in for the mod.
+
+`GameClient.run_case` is the code path that runs ten thousand times when
+somebody finally measures sim/game agreement, and it had no tests: the real
+server needs Minecraft, so the client's whole request/response cycle was
+unexercised. A fake that speaks the protocol the mod's HarnessServer speaks
+covers all of it except the Java.
+
+This is not a mock of the client. It is a second implementation of the
+*server* side, written from the README and checked against HarnessServer.java,
+so a change to either end that breaks the contract fails here.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import socket
+import sys
+import threading
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "harness"))
+
+from compare import Case, GameClient, HarnessError  # noqa: E402
+
+from daedalus.spec import Spec  # noqa: E402
+from daedalus.synth import compile as compile_spec  # noqa: E402
+
+
+class FakeHarness:
+    """A server that answers the way the Fabric mod is documented to answer.
+
+    ``rows`` and ``settled`` are what it will report; ``script`` overrides the
+    reply for a given op entirely, which is how the protocol violations below
+    are provoked.
+    """
+
+    def __init__(self, rows=None, settled=True, script=None):
+        self.rows = rows
+        self.settled = settled
+        self.script = script or {}
+        self.seen: list[dict] = []
+        self._sock = socket.socket()
+        self._sock.bind(("127.0.0.1", 0))
+        self._sock.listen(1)
+        self.address = self._sock.getsockname()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _reply(self, request: dict) -> str | None:
+        op = request.get("op")
+        if op in self.script:
+            return self.script[op]
+        if op == "place":
+            return json.dumps({"id": request["id"], "placed": True})
+        if op == "test":
+            n_in, n_out = len(request["levers"]), len(request["lamps"])
+            rows = self.rows
+            if rows is None:
+                rows = [
+                    [(m >> k) & 1 for k in range(n_in)] + [0] * n_out
+                    for m in range(1 << n_in)
+                ]
+            return json.dumps({"id": request["id"], "rows": rows, "settled": self.settled})
+        return json.dumps({"error": f"unknown op {op}"})
+
+    def _serve(self) -> None:
+        try:
+            connection, _ = self._sock.accept()
+        except OSError:
+            return
+        with connection, connection.makefile("rwb") as stream:
+            while True:
+                line = stream.readline()
+                if not line:
+                    return
+                request = json.loads(line)
+                self.seen.append(request)
+                reply = self._reply(request)
+                if reply is None:
+                    return  # hang up mid-conversation
+                stream.write((reply + "\n").encode())
+                stream.flush()
+
+    def close(self) -> None:
+        self._sock.close()
+
+
+@pytest.fixture(scope="module")
+def case(verifier_module) -> Case:
+    import random
+
+    spec = Spec.parse("inputs A B\noutputs Q\nQ = !(A & B)")
+    placed = spec.default_placement(random.Random(0))
+    attempt = compile_spec(
+        spec, verifier_module, random.Random(0), attempts=30, fixed_placement=placed
+    )
+    assert attempt.ok
+    return Case("case-00000", spec, placed, attempt.grid.tokens())
+
+
+@pytest.fixture(scope="module")
+def verifier_module():
+    from daedalus.redsim import Verifier
+
+    with Verifier() as v:
+        yield v
+
+
+def drive(case: Case, **kwargs):
+    harness = FakeHarness(**kwargs)
+    try:
+        with GameClient(*harness.address, timeout=10) as client:
+            return client.run_case(case), harness
+    finally:
+        harness.close()
+
+
+class TestHappyPath:
+    def test_a_full_exchange_is_two_requests_in_order(self, case):
+        (_rows, _settled), harness = drive(case)
+        assert [r["op"] for r in harness.seen] == ["place", "test"]
+
+    def test_the_schematic_it_sends_is_a_real_one(self, case):
+        _result, harness = drive(case)
+        blob = base64.b64decode(harness.seen[0]["schematic"])
+        # Sponge .schem files are gzipped NBT; the mod parses them as such.
+        assert blob[:2] == b"\x1f\x8b"
+
+    def test_the_ports_it_sends_are_the_case_s_own(self, case):
+        _result, harness = drive(case)
+        request = harness.seen[1]
+        assert [tuple(p) for p in request["levers"]] == list(case.placed.input_ports)
+        assert [tuple(p) for p in request["lamps"]] == list(case.placed.output_ports)
+
+    def test_rows_come_back_as_output_bitmasks(self, case):
+        # The wire format is inputs-then-outputs per row; the comparison wants
+        # one integer per row, so this is where a mixed-up split would land.
+        n_in = len(case.placed.input_ports)
+        rows = [[(m >> k) & 1 for k in range(n_in)] + [1] for m in range(4)]
+        (got, _settled), _harness = drive(case, rows=rows)
+        assert got == [1, 1, 1, 1]
+
+    def test_a_row_of_zeroes_is_zero_not_missing(self, case):
+        n_in = len(case.placed.input_ports)
+        rows = [[(m >> k) & 1 for k in range(n_in)] + [0] for m in range(4)]
+        (got, _settled), _harness = drive(case, rows=rows)
+        assert got == [0, 0, 0, 0]
+
+    def test_an_unsettled_sweep_is_carried_through(self, case):
+        # A circuit still changing at the tick cap is real-game evidence of an
+        # oscillator and has to reach the comparison, not be flattened to True.
+        (_rows, settled), _harness = drive(case, settled=False)
+        assert settled is False
+
+
+class TestProtocolViolations:
+    """Every one of these is a wrong answer that must not become a result."""
+
+    def test_an_error_object_raises_rather_than_returning(self, case):
+        with pytest.raises(HarnessError, match="no such world"):
+            drive(case, script={"place": json.dumps({"error": "no such world"})})
+
+    def test_a_place_that_is_not_acknowledged_is_refused(self, case):
+        with pytest.raises(ConnectionError, match="acknowledge"):
+            drive(case, script={"place": json.dumps({"id": "case-00000", "placed": False})})
+
+    def test_a_reply_about_a_different_case_is_refused(self, case):
+        # Two cases crossing on one connection would silently attribute one
+        # circuit's behaviour to another.
+        with pytest.raises(ConnectionError, match="acknowledge"):
+            drive(case, script={"place": json.dumps({"id": "case-99999", "placed": True})})
+
+    def test_a_test_reply_about_a_different_case_is_refused(self, case):
+        with pytest.raises(ConnectionError, match="invalid test response"):
+            drive(case, script={"test": json.dumps({"id": "elsewhere", "rows": []})})
+
+    def test_a_row_of_the_wrong_width_is_refused(self, case):
+        # Short a column means the input/output split is wrong, and every row
+        # after it would be scored against the wrong bits.
+        with pytest.raises(ConnectionError, match="malformed truth-table row"):
+            drive(case, script={"test": json.dumps({"id": "case-00000", "rows": [[0, 0]]})})
+
+    def test_a_non_object_response_is_refused(self, case):
+        with pytest.raises(ConnectionError, match="non-object"):
+            drive(case, script={"place": json.dumps([1, 2, 3])})
+
+    def test_invalid_json_is_refused(self, case):
+        with pytest.raises(ConnectionError, match="invalid JSON"):
+            drive(case, script={"place": "{not json"})
+
+    def test_a_hang_up_mid_conversation_is_refused(self, case):
+        with pytest.raises(ConnectionError, match="closed the connection"):
+            drive(case, script={"place": None})
