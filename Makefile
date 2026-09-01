@@ -1,6 +1,7 @@
 # Everything depends on the verifier, so it builds first.
 .PHONY: all verifier test test-rust test-python lint selftest web tui corpus baselines \
-	bench-compiler harness-setup harness-server harness-smoke \
+	bench-compiler harness-setup harness-server harness-smoke harness-check \
+	golden-cases \
         bench train sample loop repair agreement clean
 
 all: verifier
@@ -84,7 +85,16 @@ harness-server:
 harness-smoke:
 	harness/server/smoke.sh --cases 10
 
-agreement: verifier
+# Everything the real run does except talk to Minecraft. Fast, needs no
+# network, and is the cheapest way to find out the harness is miswired.
+harness-check: verifier
+	python3 harness/compare.py --suite golden --self-check --export-golden --out /dev/null
+
+# Write the Rust golden circuits where compare.py can replay them.
+golden-cases:
+	REDSIM_DUMP_GOLDEN=$(CURDIR)/target/golden-cases.json cargo test --test golden golden_suite
+
+agreement: verifier golden-cases
 	python3 harness/compare.py --cases 10000 --out agreement.json
 
 clean:

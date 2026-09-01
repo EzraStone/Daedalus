@@ -41,11 +41,20 @@ Three steps, on Linux, macOS or Windows. They need a network and about a
 gigabyte of downloads, which is why nothing else in the build depends on them.
 
 ```
+make harness-check     # everything but Minecraft — start here
 make harness-setup     # build the mod, fetch the pinned Fabric server
 make harness-server    # run it (leave this going)
 make harness-smoke     # ten cases end to end, in another shell
 make agreement         # the real run: 10,000 cases
 ```
+
+`harness-check` runs every golden case through the whole pipeline against a
+stand-in that answers with `redsim`'s own verdict. Agreement is 100% by
+construction and says nothing about Minecraft — what it checks is that cases
+build, schematics serialise, the request and response shapes line up, and the
+report adds up. It costs seconds and needs no network, and it is the cheapest
+way to find out the harness is miswired before spending an hour on a server.
+It found its first bug on its first run.
 
 `server/*.sh` and `server/*.ps1` are the same three steps twice, and they build
 the same runtime: `tests/test_harness_scripts.py` diffs the server
