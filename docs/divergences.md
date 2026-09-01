@@ -87,7 +87,11 @@ rejects the circuit; `power` is a viewer and takes the grid as given.
 the truth tables, classifying each disagreement by the divergence it implicates.
 The targets from the design:
 
-- **100% agreement on the golden set** (104 hand-built circuits).
+- **100% agreement on the golden set** — 94 of the 104 hand-built circuits,
+  plus 2 built in the harness itself, so 96 replayed. The 10 left out are
+  malformed by construction (floating dust, a port violation); they are what
+  `check_malformed` is for, and a grid that cannot be placed in a world is
+  not a question about the game.
 - **≥99.5% agreement on 10k random generated circuits.**
 
 Neither has been measured yet: the Fabric mod half of the harness is committed

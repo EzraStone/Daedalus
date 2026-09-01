@@ -19,8 +19,16 @@ compare.py ──.schem──► Fabric mod ──► void world ──► toggl
 
 Two numbers, both in the README:
 
-- **100% agreement on the golden set.** 104 hand-built circuits with hand-derived
-  verdicts. Anything less is a bug in the simulator, not a tolerance.
+- **100% agreement on the golden set.** The 104 hand-built circuits with
+  hand-derived verdicts, minus the 10 that are malformed by construction and
+  cannot be placed in a world at all — so 94, plus the 2 built here, is what
+  actually gets replayed. Anything less is a bug in the simulator, not a
+  tolerance.
+
+  They live in `crates/redsim/tests/golden.rs` and reach this side through
+  `REDSIM_DUMP_GOLDEN`; `compare.py --export-golden` runs that for you and
+  prints how many it got. Without the export the golden suite is the two
+  hand-built cases, which is a much weaker claim and is reported as such.
 - **≥99.5% agreement on 10k random generated circuits.** This is the one that
   makes the rest of the repository believable, and on its own it is a more
   rigorous artifact than most Minecraft-AI projects contain.
