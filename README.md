@@ -69,7 +69,7 @@ no README.
 | `crates/redsim` — the verifier | Complete. 104-case golden suite, 35 tests, 41 µs per evaluation batched (188 µs one at a time — the difference is pipe round-trip, not simulation). |
 | `daedalus.spec` — the DSL | Complete. Full grammar, canonicalisation, semantic hashing byte-identical to the Rust side. |
 | `daedalus.synth` — the procedural compiler | Working. Planar routing plus verified two-level bridges for crossbar netlists. About 5.5 specs/second; the yield gap, not the speed, is the open problem. |
-| `daedalus.data` — the corpus engine | Working end to end. Builds, verifies, splits, writes a dataset card. |
+| `daedalus.data` — the corpus engine | Working end to end. Builds, verifies, splits, writes a dataset card. Single-output by default; `--max-outputs` draws wider specs at roughly half the yield per output. |
 | `daedalus.schematic` — export | Complete. `.schem` and `.litematic`, dependency-free NBT. |
 | `daedalus.eval` — metrics and baselines | Complete. Three of four baselines runnable today. |
 | `daedalus.web` — the local window | Complete. Watch a spec get placed, routed and verified, step by step. |
@@ -83,6 +83,7 @@ no README.
 |---|---|
 | a model worth the name | The code runs, but **nothing has been trained at a useful size**. The largest run so far is 557K parameters for 48 steps on a CPU, which verifies nothing. There is no pass@k worth quoting. |
 | `harness/mod` — the Fabric mod | Committed as source with the protocol pinned. Never compiled, never run: no Minecraft server available. |
+| `harness/` — the fidelity harness | Runs on Linux, macOS and Windows; `make harness-check` puts all 96 golden circuits through the whole pipeline against a stand-in for the game. The game half is still unrun. |
 | sim↔game agreement | **Not measured.** This is the number that would make everything else believable, and it does not exist yet. See [`docs/divergences.md`](docs/divergences.md). |
 
 **So: every number in this repository is internally consistent, and none of it
