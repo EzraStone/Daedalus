@@ -324,6 +324,47 @@ class TestStaleBinaryCheck:
         assert "MISS  verifier" not in capsys.readouterr().out
 
 
+class TestDatasetCard:
+    """A corpus directory that cannot say what is in it is not a release."""
+
+    def test_the_card_records_the_sampler_it_was_drawn_with(self, tmp_path, capsys):
+        assert main(["corpus", str(tmp_path / "c"), "--scale", "0.01"]) == 0
+        capsys.readouterr()
+        card = (tmp_path / "c" / "DATASET_CARD.md").read_text()
+        assert "## Sampler" in card
+        assert "| outputs | up to 1 |" in card
+        assert "and, or, xor" in card
+
+    def test_a_single_output_corpus_says_so_in_its_limits(self, tmp_path, capsys):
+        # True of every corpus this repository has ever built, and it appeared
+        # nowhere in the output. A model trained on one has never seen a
+        # circuit that drives two lamps.
+        assert main(["corpus", str(tmp_path / "c"), "--scale", "0.01"]) == 0
+        capsys.readouterr()
+        card = (tmp_path / "c" / "DATASET_CARD.md").read_text()
+        assert "one output" in card
+
+    def test_a_wider_corpus_drops_that_limit_and_says_the_real_bound(
+        self, tmp_path, capsys
+    ):
+        assert main(["corpus", str(tmp_path / "c"), "--scale", "0.01",
+                     "--max-outputs", "3"]) == 0
+        capsys.readouterr()
+        card = (tmp_path / "c" / "DATASET_CARD.md").read_text()
+        assert "one output" not in card
+        assert "| outputs | up to 3 |" in card
+
+    def test_the_report_carries_the_sampler_too(self, tmp_path, capsys):
+        # The card is for people; report.json is what a script reads.
+        import json as _json
+
+        assert main(["corpus", str(tmp_path / "c"), "--scale", "0.01",
+                     "--max-outputs", "2"]) == 0
+        capsys.readouterr()
+        report = _json.loads((tmp_path / "c" / "report.json").read_text())
+        assert report["sampler"]["max_outputs"] == 2
+
+
 class TestCorpusOutputs:
     def test_an_impossible_output_count_is_a_usage_error(self, capsys):
         # SampleConfig raises on it now, and a traceback is the wrong way for
