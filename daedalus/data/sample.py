@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 from ..spec import Constraints, Spec
 from ..spec.canon import irrelevant_inputs, is_constant
-from ..spec.dsl import Binary, Not, ParsedSpec, Ref
+from ..spec.dsl import MAX_INPUTS, MAX_OUTPUTS, Binary, Not, ParsedSpec, Ref
 
 #: Operators §04 asks the DAG sampler to draw from.
 ALL_GATES = ("and", "or", "xor")
@@ -54,6 +54,32 @@ class SampleConfig:
     #: over the same inputs, which is the only way the corpus contains a
     #: circuit whose subterm feeds two places.
     max_outputs: int = 1
+
+    def __post_init__(self) -> None:
+        """Refuse a configuration that cannot mean what it says.
+
+        `max_outputs` spent a long time being read by nothing, so a value
+        that is silently ignored is a mistake this file has already made
+        once. The same shape is available through the bounds: `NAMES` holds
+        six names and the DSL caps inputs at six, so asking for eight
+        produced a six-input spec and no complaint.
+        """
+        if not 1 <= self.min_inputs <= self.max_inputs:
+            raise ValueError(f"inputs {self.min_inputs}..{self.max_inputs} is not a range")
+        if self.max_inputs > MAX_INPUTS:
+            raise ValueError(
+                f"max_inputs={self.max_inputs} exceeds the v1 limit of {MAX_INPUTS}"
+            )
+        if self.max_inputs > len(NAMES):
+            raise ValueError(f"only {len(NAMES)} port names are defined")
+        if not 1 <= self.max_outputs <= MAX_OUTPUTS:
+            raise ValueError(
+                f"max_outputs={self.max_outputs} is outside 1..{MAX_OUTPUTS}"
+            )
+        if not 0 <= self.min_gates <= self.max_gates:
+            raise ValueError(f"gates {self.min_gates}..{self.max_gates} is not a range")
+        if not self.gate_set:
+            raise ValueError("gate_set is empty; nothing could be sampled")
 
     def with_gates(self, lo: int, hi: int) -> SampleConfig:
         from dataclasses import replace
