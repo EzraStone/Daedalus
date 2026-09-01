@@ -322,9 +322,9 @@ class Synthesiser:
     #: placement is both cheaper and more likely to verify.
     MAX_BRIDGES = 2
 
-    def _place_and_route(self, g: int) -> None:
+    def _scored_sites(self, g: int) -> list[tuple[Cell, Orientation]]:
+        """Every clear site for inverter ``g``, best first."""
         gate = self.lib.inverter
-        nets_of_driver = self._nets_by_driver()
         depths = self._inverter_depths()
         max_depth = max(depths.values(), default=0)
 
@@ -335,18 +335,25 @@ class Synthesiser:
             scored.append(
                 (self._site_cost(g, anchor, orient, depths[g], max_depth), anchor, orient)
             )
-        if not scored:
-            raise RoutingFailure("placement", f"no room for inverter {g}")
         scored.sort(key=lambda t: t[0])
+        return [(anchor, orient) for _score, anchor, orient in scored[: self.SITE_TRIALS]]
 
+    def _try_site(self, g: int, anchor: Cell, orient: Orientation) -> None:
+        """Commit one gate at one site and route what feeds it. Raises on failure."""
+        self._commit_gate(g, anchor, orient, self._nets_by_driver())
         in_net = self.net.inverter_input[g]
+        self._ensure_sources(in_net)
+        self._route_sink(in_net, Sink("inv", g))
+
+    def _place_and_route(self, g: int) -> None:
+        sites = self._scored_sites(g)
+        if not sites:
+            raise RoutingFailure("placement", f"no room for inverter {g}")
         last: RoutingFailure | None = None
-        for _score, anchor, orient in scored[: self.SITE_TRIALS]:
+        for anchor, orient in sites:
             saved = self._snapshot()
             try:
-                self._commit_gate(g, anchor, orient, nets_of_driver)
-                self._ensure_sources(in_net)
-                self._route_sink(in_net, Sink("inv", g))
+                self._try_site(g, anchor, orient)
             except RoutingFailure as e:
                 self._restore(saved)
                 last = e
