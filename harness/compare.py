@@ -141,7 +141,7 @@ class GameClient:
         with tempfile.TemporaryDirectory() as tmp:
             from daedalus.grid import Grid
 
-            path = Path(tmp) / f"{case.name}.schem"
+            path = Path(tmp) / _schematic_filename(case.name)
             write_schem(Grid.from_tokens(case.tokens), path)
             blob = base64.b64encode(path.read_bytes()).decode()
         placed = self.request({"op": "place", "id": case.name, "schematic": blob})
@@ -418,6 +418,43 @@ def build_golden_cases(export: Path | None = GOLDEN_EXPORT) -> list[Case]:
     return cases
 
 
+def _schematic_filename(name: str) -> str:
+    """A case name flattened into something that is one file, not a path.
+
+    Golden case names are hierarchical -- "invariance/buffer/row08" -- and
+    writing them under a temporary directory made every slash a directory that
+    did not exist. Every golden case would have failed against a real server
+    with a FileNotFoundError that read like a harness bug, which it was.
+    """
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in name) + ".schem"
+
+
+class EchoClient:
+    """A stand-in for the game that answers with `redsim`'s own verdict.
+
+    Not a measurement and never to be mistaken for one -- agreement against it
+    is 100% by construction, because both sides of the comparison are the same
+    simulator. What it checks is everything else: that cases build, that
+    schematics serialise, that the request and response shapes line up, that
+    rows are split into inputs and outputs the right way round, and that the
+    report adds up.
+
+    Which is worth having, because the alternative is discovering a wiring
+    mistake an hour into a real run against a Minecraft server.
+    """
+
+    name = "self-check (no game involved)"
+
+    def run_case(self, case: Case) -> tuple[list[int], bool]:
+        # Exercise the same serialisation the real path uses, so a schematic
+        # that cannot be written is caught here too.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / _schematic_filename(case.name)
+            write_schem(Grid.from_tokens(case.tokens), path)
+            base64.b64encode(path.read_bytes())
+        return list(case.simulated), case.settled
+
+
 def run(
     cases: list[Case],
     verifier: Verifier,
@@ -503,6 +540,12 @@ def main(argv=None) -> int:
         action="store_true",
         help="build and simulate the cases without contacting a server",
     )
+    ap.add_argument(
+        "--self-check",
+        action="store_true",
+        help="run the whole pipeline against a stand-in that echoes redsim; "
+        "proves the harness is wired up and measures nothing about the game",
+    )
     ap.add_argument("--out", help="write the JSON report here")
     ap.add_argument(
         "--corpus-cache",
@@ -537,7 +580,15 @@ def main(argv=None) -> int:
             cases.extend(golden)
         if args.suite in {"random", "combined"}:
             cases.extend(build_cases(args.cases, args.seed, verifier, args.corpus_cache))
-        if args.dry_run:
+        if args.self_check:
+            print(
+                "SELF-CHECK: comparing redsim against itself. Agreement is 100% by\n"
+                "construction and says nothing about Minecraft; it says the harness\n"
+                "is wired up correctly.",
+                file=sys.stderr,
+            )
+            report = run(cases, verifier, EchoClient(), args.progress_every)
+        elif args.dry_run:
             report = run(cases, verifier, None, args.progress_every)
         else:
             try:
