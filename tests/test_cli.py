@@ -325,6 +325,15 @@ class TestStaleBinaryCheck:
 
 
 class TestCorpusOutputs:
+    def test_an_impossible_output_count_is_a_usage_error(self, capsys):
+        # SampleConfig raises on it now, and a traceback is the wrong way for
+        # a command line to say "that number is out of range".
+        import pytest as _pytest
+
+        with _pytest.raises(SystemExit):
+            main(["corpus", "/tmp/unused", "--max-outputs", "9"])
+        assert "invalid choice" in capsys.readouterr().err
+
     def test_the_flag_reaches_the_sampler(self, tmp_path, capsys):
         # The knob it exposes was decoration until recently, so this checks
         # the whole path rather than the argument parser: examples with more

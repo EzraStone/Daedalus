@@ -289,6 +289,57 @@ class TestMultiOutputSampling:
             )
 
 
+class TestSampleConfigValidation:
+    """A knob that is silently ignored is a bug this file has already had.
+
+    max_outputs was declared and read by nothing for as long as it existed.
+    The bounds offered the same shape: NAMES holds six names and the DSL caps
+    inputs at six, so asking for eight produced a six-input spec and no
+    complaint. Refusing is cheaper than discovering it in a corpus.
+    """
+
+    def _bad(self, **kw):
+        from dataclasses import replace
+
+        from daedalus.data.sample import SampleConfig
+
+        with pytest.raises(ValueError):
+            replace(SampleConfig(), **kw)
+
+    def test_more_inputs_than_the_dsl_allows(self):
+        self._bad(max_inputs=8)
+
+    def test_more_outputs_than_the_dsl_allows(self):
+        self._bad(max_outputs=9)
+
+    def test_no_outputs_at_all(self):
+        self._bad(max_outputs=0)
+
+    def test_an_empty_gate_set(self):
+        self._bad(gate_set=())
+
+    def test_a_backwards_gate_range(self):
+        self._bad(min_gates=5, max_gates=2)
+
+    def test_a_backwards_input_range(self):
+        self._bad(min_inputs=4, max_inputs=2)
+
+    def test_the_defaults_are_valid(self):
+        from daedalus.data.sample import SampleConfig
+
+        assert SampleConfig().max_inputs <= 6
+
+    def test_with_gates_still_produces_a_valid_config(self):
+        # It goes through dataclasses.replace, so it runs the same check --
+        # which would be a nasty surprise if the split bounds were outside it.
+        from daedalus.data.corpus import DEFAULT_SPLITS
+        from daedalus.data.sample import SampleConfig
+
+        for split in DEFAULT_SPLITS:
+            cfg = SampleConfig().with_gates(split.gate_lo, split.gate_hi)
+            assert cfg.min_gates <= cfg.max_gates
+
+
 class TestPromptEncoding:
     """Prompts into features, for the conditioning path that was only a slot."""
 

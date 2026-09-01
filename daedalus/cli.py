@@ -16,6 +16,7 @@ from pathlib import Path
 from . import __version__
 from .redsim import Verifier, VerifierError
 from .spec import Spec, SpecSyntaxError
+from .spec.dsl import MAX_OUTPUTS
 
 
 def _read_spec(text: str) -> Spec:
@@ -1000,6 +1001,8 @@ def main(argv=None) -> int:
         "--max-outputs",
         type=int,
         default=1,
+        choices=range(1, MAX_OUTPUTS + 1),
+        metavar=f"{{1..{MAX_OUTPUTS}}}",
         help="draw specs with up to this many outputs; above 1 costs roughly "
         "half the yield per output (see docs/benchmarks.md)",
     )
