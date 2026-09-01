@@ -236,6 +236,47 @@ def cmd_baselines(args) -> int:
     return 0
 
 
+def _report_harness(report) -> None:
+    """Say how far the fidelity harness would get, without running it.
+
+    doctor covered the verifier, the compiler and the optional extras and said
+    nothing about the harness, which is the thing the first item on the
+    next-steps list depends on. All three of these are cheap file checks; none
+    of them starts a server.
+    """
+    root = Path(__file__).resolve().parent.parent
+    server = root / "harness" / "server"
+
+    export = root / "target" / "golden-cases.json"
+    if export.exists():
+        try:
+            count = len(json.loads(export.read_text(encoding="utf-8")))
+        except (ValueError, OSError):
+            count = 0
+        report(
+            "golden export",
+            count >= 100,
+            f"{count} circuits at {export.relative_to(root)}"
+            if count
+            else f"{export.relative_to(root)} is unreadable — rerun `make golden-cases`",
+        )
+    else:
+        report(
+            "golden export",
+            False,
+            "not exported — `make golden-cases`, or the golden suite is 2 cases (optional)",
+        )
+
+    runtime = server / "runtime" / "fabric-server-launch.jar"
+    report(
+        "harness server",
+        runtime.exists(),
+        str(runtime.relative_to(root))
+        if runtime.exists()
+        else "not set up — `make harness-setup` (needs a network) (optional)",
+    )
+
+
 def _newer_sources(binary: Path) -> Path | None:
     """A Rust source file modified after the binary was built, if any.
 
@@ -332,6 +373,8 @@ def cmd_doctor(args) -> int:
             not missing,
             "ready" if not missing else f"missing {', '.join(missing)} (optional)",
         )
+
+    _report_harness(report)
 
     # Only the verifier and the compiler are required. A missing extra is a
     # choice, not a broken install, so it must not fail the exit code.

@@ -324,6 +324,36 @@ class TestStaleBinaryCheck:
         assert "MISS  verifier" not in capsys.readouterr().out
 
 
+class TestDoctorHarness:
+    """doctor said nothing about the thing the first next-step depends on."""
+
+    def test_it_reports_both_halves_of_the_harness(self, capsys):
+        assert main(["doctor"]) == 0
+        out = capsys.readouterr().out
+        assert "golden export" in out
+        assert "harness server" in out
+
+    def test_a_missing_harness_is_optional_not_a_failure(self, capsys):
+        # A Python-only checkout with no Cargo and no Minecraft is a working
+        # install of everything this repository can actually run here.
+        assert main(["doctor"]) == 0
+        out = capsys.readouterr().out
+        for line in out.splitlines():
+            if line.startswith("  MISS") and "harness" in line:
+                assert "(optional)" in line
+
+    def test_it_names_the_command_that_fixes_a_missing_export(self, capsys):
+        import daedalus.cli as cli
+
+        lines = []
+        cli._report_harness(lambda name, good, detail, required=False: lines.append(
+            (name, good, detail)
+        ))
+        for name, good, detail in lines:
+            if not good:
+                assert "make " in detail, (name, detail)
+
+
 class TestBench:
     def test_compiler_mode_reports_where_the_time_goes(self, capsys):
         # The point of the mode. A verdict costs microseconds and a layout
