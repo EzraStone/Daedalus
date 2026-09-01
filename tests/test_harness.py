@@ -163,7 +163,10 @@ def test_bridge_fidelity_case_is_elevated_and_passes_redsim():
 
 
 def test_golden_fidelity_cases_have_unique_names_and_expected_tables():
-    cases = build_golden_cases()
+    # `export=None` pins this to the two hand-built cases. Without it the
+    # answer depends on whether target/golden-cases.json happens to be lying
+    # around, which is not something a test should be sensitive to.
+    cases = build_golden_cases(export=None)
 
     assert len({case.name for case in cases}) == len(cases)
     with Verifier() as verifier:
@@ -174,3 +177,88 @@ def test_golden_fidelity_cases_have_unique_names_and_expected_tables():
         "golden-direct-repeater": [0, 1],
         "golden-bridge-independent": [0, 1, 2, 3],
     }
+
+
+@pytest.fixture(scope="module")
+def export(tmp_path_factory):
+    """Run the Rust golden test once and hand back the file it wrote."""
+    import shutil as _shutil
+
+    from compare import export_golden_cases
+
+    if _shutil.which("cargo") is None:
+        pytest.skip("no cargo toolchain")
+    return export_golden_cases(tmp_path_factory.mktemp("golden") / "cases.json")
+
+
+class TestGoldenExport:
+    """The 104 Rust golden circuits, made reachable from the Python harness.
+
+    Three documents promise "100% agreement on the golden set, 104 hand-built
+    circuits". The harness could reach two hand-built cases, because the rest
+    are constructed inside a Rust integration test with no way out of the test
+    binary. These check the bridge, not the circuits.
+    """
+
+    def test_the_rust_suite_exports_every_case(self, export):
+        import json as _json
+
+        records = _json.loads(export.read_text())
+        assert len(records) >= 100, f"golden suite exported only {len(records)}"
+
+    def test_each_exported_case_is_a_full_grid(self, export):
+        import json as _json
+
+        for record in _json.loads(export.read_text()):
+            assert len(record["tokens"]) == V.CELLS, record["name"]
+            assert len(record["rows"]) == 1 << len(record["input_z"])
+
+    def test_the_names_are_unique(self, export):
+        import json as _json
+
+        names = [r["name"] for r in _json.loads(export.read_text())]
+        assert len(set(names)) == len(names)
+
+    def test_malformed_cases_are_marked_and_dropped(self, export):
+        # A grid with floating dust cannot be placed in a world, so replaying
+        # it is not a fidelity question -- it would be a guaranteed
+        # disagreement against a suite whose stated target is 100%.
+        import json as _json
+
+        from compare import load_golden_export
+
+        records = _json.loads(export.read_text())
+        marked = [r for r in records if r.get("malformed")]
+        assert marked, "expected some malformed-by-construction cases"
+        loaded = load_golden_export(export)
+        assert len(loaded) == len(records) - len(marked)
+        assert not any(c.name == marked[0]["name"] for c in loaded)
+
+    def test_every_loaded_case_simulates_to_a_truth_table(self, export):
+        # The point of dropping the malformed ones. A case redsim cannot give
+        # a table to has nothing for the game to be diffed against.
+        from compare import load_golden_export
+
+        with Verifier() as verifier:
+            for case in load_golden_export(export):
+                simulate(case, verifier)
+                assert case.simulated or not case.settled, case.name
+
+    def test_unstable_cases_are_kept(self, export):
+        # An oscillator is a real fidelity question -- the game should fail to
+        # settle it too -- so unlike the malformed ones it stays in.
+        from compare import load_golden_export
+
+        with Verifier() as verifier:
+            cases = load_golden_export(export)
+            for case in cases:
+                simulate(case, verifier)
+        assert any(not case.settled for case in cases)
+
+    def test_a_missing_export_is_not_an_error(self, tmp_path):
+        # It needs a Cargo toolchain, which a Python-only checkout will not
+        # have. Falling back to the hand-built pair is the right behaviour;
+        # pretending it is the full suite is not, and main says which it got.
+        from compare import build_golden_cases
+
+        assert len(build_golden_cases(tmp_path / "absent.json")) == 2
