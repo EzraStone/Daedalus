@@ -50,6 +50,31 @@ They are extensions, not disagreements with the game:
   is the check that turns the update-order divergence from a silent risk into a
   rejection.
 
+## Divergences the harness can see that a verdict cannot
+
+A verdict is one value; a comparison has two sides, and two of them disagree in
+ways no single verdict can express.
+
+**Settling.** Whether a circuit reaches a resting state is asked separately of
+each side, and the answers can differ. `redsim` settling where the real game
+oscillates — or the reverse — is a divergence *even when the truth tables
+match*, and the tables often will match, because a circuit that ends up in the
+right state having wobbled on the way looks identical once it stops. The
+harness counts that as a disagreement rather than an agreement and records
+which side oscillated; scoring it as agreement would quietly inflate the
+headline figure with the circuits most worth looking at.
+
+The divergence it implicates is update order. `redsim` latches every
+component's input from the pre-update field and applies all changes at once;
+the real game does not, so a circuit whose resting state depends on the order
+it got there is exactly this class.
+
+**Cases the game cannot host.** Ten of the 104 golden circuits are malformed by
+construction — floating dust, a port violation. Those are what `check_malformed`
+is for, and a grid that cannot be placed in a world at all is not a question
+about the game. They are excluded from the replay rather than counted as
+disagreements.
+
 ## What the signal view is, and is not
 
 `daedalus power` — and the signal buttons in the web and terminal UIs — ask the
