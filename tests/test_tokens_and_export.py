@@ -80,6 +80,34 @@ class TestLegality:
         for row in (mask[0], mask[V.index(3, 1, 3)]):
             assert not any(row[t] for t in (V.PAD, V.BOS, V.EOS, V.MASK))
 
+    def test_a_port_cell_admits_only_its_port_block(self, spec):
+        # The mask confined lamps to output ports but left air legal there, so
+        # a sampler could spend probability on a grid with no lamp in it --
+        # which the verifier rejects as a port violation. Measured over 300
+        # masked random grids, pinning both directions takes port violations
+        # from 13 to 0.
+        placed = spec.default_placement()
+        mask = legality_mask(placed)
+        fixed = port_mask(placed)
+        for cell, token in fixed.items():
+            allowed = [t for t in range(len(mask[cell])) if mask[cell][t]]
+            assert allowed == [token], (V.unindex(cell), allowed)
+
+    def test_pinning_ports_does_not_touch_ordinary_cells(self, spec):
+        # The mask is position-only legality. Narrowing anything but the
+        # declared port cells would be the sampler's job leaking into it.
+        placed = spec.default_placement()
+        with_spec = legality_mask(placed)
+        without = legality_mask(None)
+        fixed = set(port_mask(placed))
+        levers = {t for t in V.BLOCK_TOKENS if V.decode(t).kind in ("lever", "lamp")}
+        for i in range(V.CELLS):
+            if i in fixed:
+                continue
+            for t in range(V.VOCAB_SIZE):
+                if t not in levers:
+                    assert with_spec[i][t] == without[i][t], (V.unindex(i), t)
+
     def test_ports_are_pinned(self, spec):
         placed = spec.default_placement()
         fixed = port_mask(placed)

@@ -154,17 +154,20 @@ def legality_mask(placed_spec=None) -> list[list[bool]]:
     something to hang on) need the whole grid and belong in the sampler, which
     knows what it has committed to so far.
 
-    Pass ``placed_spec`` to also confine levers and lamps to the cells the
-    spec declares as ports. They are the two states whose legality is decided
-    entirely by the spec rather than by physics, and a stray one anywhere else
-    is a port violation the verifier will reject.
+    Pass ``placed_spec`` to also fix the port cells in both directions: levers
+    and lamps only at declared ports, and nothing *but* the declared block at
+    one. They are the states whose legality is decided entirely by the spec
+    rather than by physics, and either mistake is a port violation the
+    verifier will reject.
     """
     levers = [t for t in range(V.VOCAB_SIZE) if _is_kind(t, "lever")]
     lamps = [t for t in range(V.VOCAB_SIZE) if _is_kind(t, "lamp")]
     inputs, outputs = set(), set()
+    fixed: dict[int, int] = {}
     if placed_spec is not None:
         inputs = {V.index(*p) for p in placed_spec.input_ports}
         outputs = {V.index(*p) for p in placed_spec.output_ports}
+        fixed = port_mask(placed_spec)
 
     mask = []
     for i in range(V.CELLS):
@@ -176,6 +179,15 @@ def legality_mask(placed_spec=None) -> list[list[bool]]:
                 row[t] = row[t] and i in inputs
             for t in lamps:
                 row[t] = row[t] and i in outputs
+            # And the other direction. A port cell is not the model's to
+            # choose -- `port_mask` overwrites it anyway -- so leaving air
+            # legal at an output port only let the sampler spend probability
+            # on grids with no lamp in them, which the verifier then rejects
+            # as a port violation. Pinning both directions is what the
+            # docstring above claims this mask is for.
+            pinned = fixed.get(i)
+            if pinned is not None:
+                row = [t == pinned for t in range(TOTAL_VOCAB)]
         mask.append(row)
     return mask
 
