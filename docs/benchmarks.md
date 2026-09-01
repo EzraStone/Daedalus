@@ -223,6 +223,27 @@ undiagnosed regression, and separately ruled out the gate-spreading change in
 and an intermediate value 1.49%). That ruling-out stands; the regression
 framing does not.
 
+### Re-checked after the fan-out buffer, and unmoved
+
+Adding a buffer stage changed the netlist compiler, which is upstream of every
+number above, so the run was repeated on both sides of it. The two are
+identical — not close:
+
+| | attempts | routed | bridged | placement | ports | routing | signal |
+|---|---|---|---|---|---|---|---|
+| before buffering | 2046 | 31 | 5 | 112 | 60 | 1829 | 14 |
+| after | 2046 | 31 | 5 | 112 | 60 | 1829 | 14 |
+
+Neither run recorded a single netlist failure, which is the interesting part.
+The specs a corpus build draws never ask a driver to feed four nets, so the
+limit the buffer lifts was never the thing standing in the way here. It bites
+elsewhere: sampling directly with `sample_unique` at the same defaults, about
+one spec in ten would have been refused for fan-out before buffering existed.
+
+That is worth knowing before anyone reads the buffer as a corpus improvement.
+It removes a hard limit on what *can* be expressed; it moves nothing about
+what this corpus builds.
+
 ### Retrying barely helps
 
 Sixty random specs, same seed, varying only the retry budget:
