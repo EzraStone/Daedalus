@@ -27,6 +27,32 @@ Two numbers, both in the README:
 
 Publishing a number below target is still worth doing. Publishing none is not.
 
+## Running it
+
+Three steps, on Linux, macOS or Windows. They need a network and about a
+gigabyte of downloads, which is why nothing else in the build depends on them.
+
+```
+make harness-setup     # build the mod, fetch the pinned Fabric server
+make harness-server    # run it (leave this going)
+make harness-smoke     # ten cases end to end, in another shell
+make agreement         # the real run: 10,000 cases
+```
+
+`server/*.sh` and `server/*.ps1` are the same three steps twice, and they build
+the same runtime: `tests/test_harness_scripts.py` diffs the server
+configuration the two halves write and fails if they drift apart. A runtime
+that differed between platforms would surface as a *fidelity* disagreement,
+with nothing pointing at the real cause.
+
+Java comes from the machine where possible. `bootstrap-java.sh` fetches a
+Temurin build only when no JDK of the right major version is installed, and
+verifies it against the checksum Adoptium publishes for it — which catches a
+corrupted download and is a weaker guarantee than the Windows script's pinned
+URL and hash. That difference is deliberate and is written down in the script:
+inventing checksums for four platforms that nobody could verify would be worse
+than not pinning.
+
 ## Status
 
 `compare.py` is complete and testable: it speaks the socket protocol, drives the
@@ -35,7 +61,9 @@ Fabric mod under `mod/` is the untested half — it needs a Minecraft server, a
 Gradle toolchain and a Fabric loader, none of which exist in the environment
 this was written in. It is committed as source with the protocol pinned so the
 Python side has something concrete to talk to, and it is explicitly **not**
-claimed to have been run.
+claimed to have been run. The scripts above have not been run end to end
+either, for the same reason; what *is* tested is everything in them that does
+not need the network, which is most of their logic.
 
 ## Protocol
 

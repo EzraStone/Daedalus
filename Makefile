@@ -1,6 +1,6 @@
 # Everything depends on the verifier, so it builds first.
 .PHONY: all verifier test test-rust test-python lint selftest web tui corpus baselines \
-	bench-compiler \
+	bench-compiler harness-setup harness-server harness-smoke \
         bench train sample loop repair agreement clean
 
 all: verifier
@@ -72,6 +72,18 @@ loop: verifier
 
 # The number that makes everything else believable. Needs a Fabric server;
 # see harness/README.md.
+# The three steps to the number the whole repository is waiting on. They need
+# a network and about a gigabyte of downloads; nothing else in this Makefile
+# does, which is why they are not wired into `all`.
+harness-setup:
+	harness/server/setup.sh --accept-eula
+
+harness-server:
+	harness/server/start.sh
+
+harness-smoke:
+	harness/server/smoke.sh --cases 10
+
 agreement: verifier
 	python3 harness/compare.py --cases 10000 --out agreement.json
 
