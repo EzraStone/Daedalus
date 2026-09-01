@@ -87,6 +87,10 @@ jobs:
       - name: Run the whole harness against a stand-in for the game
         run: python harness/compare.py --suite golden --self-check --out report.json
 
+      - name: Do the same for the random suite, which exercises the case cache
+        run: |
+          python harness/compare.py --suite random --cases 8 --seed 3             --self-check --corpus-cache cache.jsonl --out random.json
+
       - name: Fail if the golden suite shrank to the hand-built pair
         run: |
           python - <<'CHECK'
