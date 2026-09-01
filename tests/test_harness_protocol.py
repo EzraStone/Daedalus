@@ -333,3 +333,55 @@ class TestSelfCheck:
         compare.run([case], verifier_module, compare.EchoClient())
         assert len(calls) == 1
         assert str(calls[0]).endswith(".schem")
+
+
+class TestRandomSuiteAndCache:
+    """The paths --suite golden never touches.
+
+    build_cases, the resumable corpus cache, and the report they produce. The
+    self-check exercises all of them without a Minecraft server, which is the
+    only way any of it gets covered at all.
+    """
+
+    def _run(self, tmp_path, *extra):
+        import compare
+
+        out = tmp_path / "report.json"
+        code = compare.main(
+            [
+                "--suite", "random", "--cases", "4", "--seed", "3",
+                "--self-check", "--out", str(out), *extra,
+            ]
+        )
+        import json as _json
+
+        return code, _json.loads(out.read_text())
+
+    def test_random_cases_go_through_the_whole_pipeline(self, tmp_path):
+        code, report = self._run(tmp_path)
+        assert code == 0
+        assert report["cases"] == 4
+        assert report["agreed"] == report["checked"] == 4
+        assert report["unreachable"] == 0
+
+    def test_the_cache_is_written_and_then_reused(self, tmp_path):
+        cache = tmp_path / "cache.jsonl"
+        _code, first = self._run(tmp_path, "--corpus-cache", str(cache))
+        assert cache.exists()
+        # One metadata line plus one line per case.
+        assert len(cache.read_text().splitlines()) == first["cases"] + 1
+
+        before = cache.read_text()
+        _code, second = self._run(tmp_path, "--corpus-cache", str(cache))
+        assert second["cases"] == first["cases"]
+        assert cache.read_text() == before, "a reused cache should not be rewritten"
+
+    def test_a_cache_from_a_different_seed_is_refused(self, tmp_path):
+        # Silently mixing two seeds' cases would make the sample something
+        # nobody chose, and the agreement figure a number over an unknown set.
+        import compare
+
+        cache = tmp_path / "cache.jsonl"
+        self._run(tmp_path, "--corpus-cache", str(cache))
+        with pytest.raises(ValueError, match="seed"):
+            compare.build_cases(2, seed=999, verifier=None, cache_path=cache)
