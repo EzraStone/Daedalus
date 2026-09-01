@@ -223,6 +223,23 @@ class TestPortLegality:
                     assert i in allowed, f"{name}: stray port at {V.unindex(i)}"
 
 
+    @pytest.mark.parametrize("name,cls", BOTH)
+    def test_every_declared_port_gets_its_block(self, name, cls):
+        # The complement of the test above, and the half that was missing. No
+        # stray ports says a lamp never appears where it should not; this says
+        # one always appears where it must. Before the mask pinned port cells
+        # in both directions, air was legal at an output port and a sample
+        # could simply leave the lamp out.
+        _spec, placed = placed_nand()
+        fixed = T.port_mask(placed)
+        for tokens in sample_many(cls, placed, 2):
+            for cell, token in fixed.items():
+                assert tokens[cell] == token, (
+                    f"{name}: {V.unindex(cell)} holds "
+                    f"{tokens[cell]} rather than the declared port block"
+                )
+
+
 class TestRepair:
     """Inpainting: the operation the diffusion model exists for.
 
