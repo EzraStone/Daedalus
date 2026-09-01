@@ -56,10 +56,21 @@ class Case:
     #: Truth table as `redsim` sees it: one output bitmask per input assignment.
     simulated: list[int] = field(default_factory=list)
     observed: list[int] | None = None
+    #: Did each side reach a resting state? Two fields, because they are two
+    #: different observations and they can disagree -- which is itself one of
+    #: the most interesting things this harness can find. They were one field,
+    #: so the game's answer overwrote the simulator's before anything compared
+    #: them, and a circuit redsim called UNSTABLE that the real game settles
+    #: looked exactly like a circuit both agreed on.
     settled: bool = True
+    observed_settled: bool = True
 
     def agrees(self) -> bool:
         return self.observed is not None and self.observed == self.simulated
+
+    def settling_disagrees(self) -> bool:
+        """One side reached a resting state and the other did not."""
+        return self.observed is not None and self.settled != self.observed_settled
 
 
 @dataclass
@@ -186,6 +197,12 @@ def classify(case: Case) -> str:
     """
     if case.observed is None:
         return "unclassified"
+    if case.settling_disagrees():
+        # One side oscillates and the other does not. Update order is the
+        # documented reason for that: redsim applies every component's change
+        # at once, and the game does not, so a circuit whose resting state
+        # depends on the order it got there is exactly the class this catches.
+        return "update-order"
     if not case.settled:
         return "update-order"
     from daedalus import vocab as V
@@ -352,7 +369,7 @@ def run(
             report.unreachable += 1
             continue
         try:
-            case.observed, case.settled = client.run_case(case)
+            case.observed, case.observed_settled = client.run_case(case)
         except (ConnectionError, OSError, HarnessError) as e:
             # HarnessError belongs here too. It means the mod took the request
             # and could not carry it out -- an unparseable schematic, a fixture
@@ -362,20 +379,29 @@ def run(
             report.unreachable += 1
             report.examples.append({"id": case.name, "error": str(e)})
             continue
-        if case.agrees():
+        # Matching truth tables are not enough. A circuit the game never
+        # settles and redsim does is a divergence even when the rows happen to
+        # line up, and counting it as agreement inflates the one number this
+        # harness exists to report.
+        if case.agrees() and not case.settling_disagrees():
             report.agreed += 1
         else:
             kind = classify(case)
             report.by_divergence[kind] = report.by_divergence.get(kind, 0) + 1
-            report.examples.append(
-                {
-                    "id": case.name,
-                    "spec": case.spec.source(ascii_only=True),
-                    "simulated": case.simulated,
-                    "observed": case.observed,
-                    "divergence": kind,
+            example = {
+                "id": case.name,
+                "spec": case.spec.source(ascii_only=True),
+                "simulated": case.simulated,
+                "observed": case.observed,
+                "divergence": kind,
+            }
+            if case.settling_disagrees():
+                # Which side oscillated, since the tables alone will not say.
+                example["settled"] = {
+                    "redsim": case.settled,
+                    "game": case.observed_settled,
                 }
-            )
+            report.examples.append(example)
         if progress_every > 0 and (index % progress_every == 0 or index == len(cases)):
             print(
                 f"checked {index}/{len(cases)}: {report.agreed} agree, "

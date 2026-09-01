@@ -223,3 +223,64 @@ class TestOneBadCaseDoesNotEndTheRun:
         finally:
             harness.close()
         assert report.examples[0]["id"] == case.name
+
+
+class TestSettlingIsTwoObservations:
+    """redsim's resting state and the game's are different facts.
+
+    They were one field. `run` overwrote the simulator's answer with the
+    game's before anything compared them, so the most interesting thing this
+    harness can find -- one side oscillating where the other does not -- was
+    destroyed on the way in.
+    """
+
+    def _report(self, case, verifier, **kwargs):
+        from compare import run
+
+        harness = FakeHarness(**kwargs)
+        try:
+            with GameClient(*harness.address, timeout=10) as client:
+                return run([case], verifier, client)
+        finally:
+            harness.close()
+
+    def _matching_rows(self, case):
+        n_in = len(case.placed.input_ports)
+        return [
+            [(m >> k) & 1 for k in range(n_in)] + [(bit >> 0) & 1]
+            for m, bit in enumerate(case.spec.rows)
+        ]
+
+    def test_both_sides_settling_on_the_same_table_agrees(self, case, verifier_module):
+        report = self._report(
+            case, verifier_module, rows=self._matching_rows(case), settled=True
+        )
+        assert report.agreed == 1
+        assert report.by_divergence == {}
+
+    def test_the_same_table_with_the_game_oscillating_is_not_agreement(
+        self, case, verifier_module
+    ):
+        # redsim settles, the game does not, and the rows line up anyway.
+        # Scoring that as agreement inflates the headline number with exactly
+        # the circuits most worth looking at.
+        report = self._report(
+            case, verifier_module, rows=self._matching_rows(case), settled=False
+        )
+        assert report.agreed == 0
+        assert report.by_divergence == {"update-order": 1}
+
+    def test_the_report_says_which_side_oscillated(self, case, verifier_module):
+        report = self._report(
+            case, verifier_module, rows=self._matching_rows(case), settled=False
+        )
+        assert report.examples[0]["settled"] == {"redsim": True, "game": False}
+
+    def test_the_simulator_s_own_verdict_is_not_overwritten(self, case, verifier_module):
+        # The field the game writes is a different one now, so a later reader
+        # can still ask what redsim thought.
+        report = self._report(
+            case, verifier_module, rows=self._matching_rows(case), settled=False
+        )
+        assert report.cases == 1
+        assert report.examples[0]["settled"]["redsim"] is True
