@@ -924,6 +924,65 @@ fn golden_suite_matches_hand_derived_verdicts() {
         failures.join("\n")
     );
 
+    // --- export for the fidelity harness ---------------------------------
+    //
+    // The golden circuits are built here, in Rust, and the fidelity harness is
+    // Python. Three documents promise "100% agreement on the golden set, 104
+    // hand-built circuits" and the harness could reach two of them, because
+    // these had no way out of the test binary. Writing them where compare.py
+    // can read them is what makes that promise checkable rather than
+    // aspirational.
+    //
+    // Gated on an environment variable, like the blessing path above: a test
+    // that writes files as a side effect of every run is a test that surprises
+    // people.
+    if let Some(path) = std::env::var_os("REDSIM_DUMP_GOLDEN") {
+        let mut out = String::from("[\n");
+        for (i, c) in cases.iter().enumerate() {
+            if i > 0 {
+                out.push_str(",\n");
+            }
+            let tokens: Vec<String> =
+                c.grid.cells().iter().map(|b| b.to_token().to_string()).collect();
+            let input_z: Vec<String> =
+                c.spec.inputs.iter().map(|p| p.pos.z.to_string()).collect();
+            let output_z: Vec<String> =
+                c.spec.outputs.iter().map(|p| p.pos.z.to_string()).collect();
+            let rows: Vec<String> = c.spec.rows.iter().map(|r| r.to_string()).collect();
+            // A case that is malformed by construction -- floating dust, a
+            // port violation -- cannot be placed in a world at all, so it is
+            // not a fidelity question and replaying it would score ten
+            // guaranteed disagreements against a suite whose target is 100%.
+            let malformed = matches!(c.expect, Expect::Malformed(_));
+            let _ = write!(
+                out,
+                concat!(
+                    r#"  {{"name":"{}","input_z":[{}],"output_z":[{}],"#,
+                    r#""rows":[{}],"malformed":{},"tokens":[{}]}}"#
+                ),
+                c.name,
+                input_z.join(","),
+                output_z.join(","),
+                rows.join(","),
+                malformed,
+                tokens.join(",")
+            );
+        }
+        out.push_str("\n]\n");
+        // Cargo runs an integration test from the crate directory, so a
+        // relative path lands under crates/redsim and its parent may not
+        // exist. Create it rather than panicking on a path the caller
+        // reasonably expected to work.
+        let path = std::path::PathBuf::from(&path);
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+        }
+        std::fs::write(&path, &out).unwrap();
+        eprintln!("wrote {} golden cases to {}", cases.len(), path.to_string_lossy());
+    }
+
     // --- snapshot --------------------------------------------------------
     let mut snap = String::new();
     snap.push_str("# redsim golden verdicts -- regenerate with REDSIM_BLESS=1\n");
