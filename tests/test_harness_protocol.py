@@ -195,3 +195,31 @@ class TestProtocolViolations:
     def test_a_hang_up_mid_conversation_is_refused(self, case):
         with pytest.raises(ConnectionError, match="closed the connection"):
             drive(case, script={"place": None})
+
+
+class TestOneBadCaseDoesNotEndTheRun:
+    """A ten thousand case sweep must survive a circuit the mod refuses."""
+
+    def test_a_refused_case_is_unreachable_not_fatal(self, case, verifier_module):
+        from compare import run
+
+        harness = FakeHarness(script={"place": json.dumps({"error": "could not place"})})
+        try:
+            with GameClient(*harness.address, timeout=10) as client:
+                report = run([case], verifier_module, client)
+        finally:
+            harness.close()
+        assert report.unreachable == 1
+        assert report.cases == 1
+        assert "could not place" in report.examples[0]["error"]
+
+    def test_the_error_is_recorded_against_the_case_that_caused_it(self, case, verifier_module):
+        from compare import run
+
+        harness = FakeHarness(script={"place": json.dumps({"error": "boom"})})
+        try:
+            with GameClient(*harness.address, timeout=10) as client:
+                report = run([case], verifier_module, client)
+        finally:
+            harness.close()
+        assert report.examples[0]["id"] == case.name

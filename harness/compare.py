@@ -353,7 +353,12 @@ def run(
             continue
         try:
             case.observed, case.settled = client.run_case(case)
-        except (ConnectionError, OSError) as e:
+        except (ConnectionError, OSError, HarnessError) as e:
+            # HarnessError belongs here too. It means the mod took the request
+            # and could not carry it out -- an unparseable schematic, a fixture
+            # it could not build -- which is one unreachable case, not a reason
+            # to abandon the other nine thousand. It is a RuntimeError, so
+            # before this it escaped the loop and ended the run.
             report.unreachable += 1
             report.examples.append({"id": case.name, "error": str(e)})
             continue
