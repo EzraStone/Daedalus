@@ -376,6 +376,33 @@ near full when they fire — they are about a net's pieces ending up in regions
 the router cannot connect after earlier nets have been committed. That points
 at ordering and at the greedy commit, not at the grid being too small.
 
+### Outputs are a second difficulty axis, and a steeper one than gates
+
+The sampler can now draw more than one output per spec. It is off by default,
+and this is why. 200 specs, seed 11, 8 attempts each:
+
+| outputs | solved | of | yield |
+|---|---|---|---|
+| 1 | 13 | 56 | 0.23 |
+| 2 | 9 | 84 | 0.11 |
+| 3 | 6 | 60 | 0.10 |
+
+Roughly half the yield for the second output, and the fall is steeper per
+output than the one per gate measured above — which is not obvious, since the
+gate budget is *split* between outputs, so a two-output spec is not a bigger
+circuit than a one-output spec of the same gate count. It is a harder one.
+The reason is structural: every output needs its own port row, its own
+repeater, and its own path across the board, and those paths compete for the
+same twelve columns.
+
+Turning it on takes the overall figure from 0.175 to 0.140 on the same seed.
+The two rows are not the same 200 specs — the sampler consumes its generator
+differently — so read the shape rather than the difference.
+
+This is the class of circuit a player is most likely to want and the corpus
+has never contained one. It stays off until the routing yield can afford it,
+which is the same conclusion as everything else in this section.
+
 ### An obvious fix for the biggest shape, which does nothing
 
 `_ensure_sources` joins a net's fragments by sorting them largest first and
